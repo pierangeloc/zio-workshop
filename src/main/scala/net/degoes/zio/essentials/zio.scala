@@ -27,22 +27,22 @@ object zio_types {
    * A program that might fail with an error of type `E` or succeed with a
    * value of type `A`.
    */
-  type FailOrSuccess[E, A] = ???
+  type FailOrSuccess[E, A] = ZIO[Any, E, A]
 
   /**
    * A program that never fails and might succeed with a value of type `A`
    */
-  type Success[A] = ???
+  type Success[A] = ZIO[Any, Nothing, A]
 
   /**
    * A program that runs forever but might fail with `E`.
    */
-  type Forever[E] = ???
+  type Forever[E] = ZIO[Any, E, Nothing]
 
   /**
    * A program that cannot fail or succeed with a value.
    */
-  type NeverStops = ???
+  type NeverStops = ZIO[Any, Nothing, Nothing]
 
   /**
    * Types aliases built into ZIO.
@@ -51,18 +51,18 @@ object zio_types {
    * An effect that may fail with a value of type `E` or succeed with a value
    * of type `A`.
    */
-  type IO[E, A] = ???
+  type IO[E, A] = ZIO[Any, E, A]
 
   /**
    * An effect that may fail with `Throwable` or succeed with a value of
    * type `A`.
    */
-  type Task[A] = ???
+  type Task[A] = ZIO[Any, Throwable, A]
 
   /**
    * An effect that cannot fail but may succeed with a value of type `A`.
    */
-  type UIO[A] = ???
+  type UIO[A] = ZIO[Any, Nothing, A]
 
 }
 
@@ -72,7 +72,7 @@ object zio_values {
    * Using `ZIO.succeed` method. Construct an effect that succeeds with the
    * integer `42`, and ascribe the correct type.
    */
-  val ioInt: ??? = ???
+  val ioInt: ZIO[Any, Nothing, Int] = ZIO.succeed(42)
 
   /**
    * Using the `ZIO.succeedLazy` method, construct an effect that succeeds with
@@ -80,20 +80,20 @@ object zio_values {
    */
   lazy val bigList       = (1L to 100000000L).toList
   lazy val bigListString = bigList.mkString("\n")
-  val ioString: ???      = ???
+  val ioString: UIO[String]      = ZIO.succeedLazy(bigListString)
 
   /**
    * Using the `ZIO.fail` method, construct an effect that fails with the string
    * "Incorrect value", and ascribe the correct type.
    */
-  val incorrectVal: ??? = ???
+  val incorrectVal: IO[String, Nothing] = ZIO.fail("Incorrect Value")
 
   /**
    * Using the `ZIO.effectTotal` method, construct an effect that wraps Scala
    * `println` method, so you have a pure functional version of print line, and
    * ascribe the correct type.
    */
-  def putStrLn(line: String): ??? = println(line) ?
+  def putStrLn(line: String): UIO[Unit] = ZIO.effectTotal(println(line))
 
   /**
    * Using the `ZIO.effect` method, wrap Scala's `readLine` method to make it
@@ -101,9 +101,14 @@ object zio_values {
    *
    * Note: You will have to use the `.refineOrDie` method to refine the
    * `Throwable` type into something more specific.
+   *
+   * If I don't catch the right exception, the thread it is running on is killed
    */
   import java.io.IOException
-  val getStrLn: ??? = ???
+  val getStrLn1: Task[String] = ZIO.effect(scala.io.StdIn.readLine())
+  val getStrLn: IO[IOException, String] = ZIO.effect(scala.io.StdIn.readLine()).refineOrDie {
+    case io: IOException => io
+  }
 
   /**
    * Using the `ZIO.effect` method, wrap Scala's `getLines` to make it
@@ -112,8 +117,9 @@ object zio_values {
    * Note: You will have to use the `.refineOrDie` method to refine the
    * `Throwable` type into something more specific.
    */
-  def readFile(file: File): IO[???, List[String]] =
-    Source.fromFile(file).getLines.toList ?
+  def readFile(file: File): IO[Throwable, List[String]] = ZIO.effect(
+    Source.fromFile(file).getLines.toList
+  )
 
   /**
    * Using the `ZIO.effect` method, wrap Scala's `Array#update` method to make
@@ -135,7 +141,7 @@ object zio_values {
   object Example extends DefaultRuntime {
     val sayHelloIO: UIO[Unit] = putStrLn("Hello ZIO!")
     //run sayHelloIO using `unsafeRun`
-    val sayHello: Unit = ???
+    val sayHello: Unit = unsafeRun(sayHelloIO)
   }
 }
 
@@ -149,34 +155,37 @@ object zio_composition {
    * by converting the integer into its string
    * and define the return ZIO type
    */
-  val toStr: ??? = IO.succeed(42) ?
+  val toStr: UIO[String] = IO.succeed(42).map(_.toString)
 
   /**
    * Add one to the value of the computation, and define the return ZIO type
    */
-  def addOne(i: Int): ??? = IO.succeed(i) ?
+  def addOne(i: Int): UIO[Int] = IO.succeed(i).map(_ + 1)
 
   /**
    * Map a ZIO value that fails with an Int 42 into ZIO value that fails with a String "42"
    * by converting the integer into its string
    * and define the return ZIO type
    */
-  val toFailedStr: ??? = IO.fail(42) ?
+  val toFailedStr: IO[String, Nothing] = IO.fail(42).mapError(_.toString)
 
   /**
    * Using `flatMap` check the precondition `p` in the result of the computation of `io`
    * and improve the ZIO types in the following input parameters
    */
-  def verify(io: IO[Nothing, Int])(p: Int => Boolean): ??? =
-    ???
+  def verify(io: UIO[Int])(p: Int => Boolean): IO[String, Int] = ??? //io.flatMap()
+//    io.flatMap { i =>
+//      if (p) => IO.succeed(i)
+//      else IO.fail("preconditino failed")
+//    }
 
   /**
    * Using `flatMap` and `map` compute the sum of the values of `a` and `b`
    * and improve the ZIO types
    */
-  val a: IO[Nothing, Int]   = IO.succeed(14)
-  val b: IO[Nothing, Int]   = IO.succeed(16)
-  val sum: IO[Nothing, Int] = ???
+  val a: UIO[Int]   = IO.succeed(14)
+  val b: UIO[Int]   = IO.succeed(16)
+  val sum: IO[Nothing, Int] = a.zipWith(b)(_ + _)
 
   /**
    * Using `flatMap`, implement `ifThenElse`, which checks the ZIO condition and
@@ -187,14 +196,17 @@ object zio_composition {
    *      ifThenElse(IO.succeed(true))(ifTrue = IO.succeed("It's true!"), ifFalse = IO.fail("It's false!"))
    */
   def ifThenElse[E, A](condition: IO[E, Boolean])(ifTrue: IO[E, A], ifFalse: IO[E, A]): IO[E, A] =
-    ???
+    for {
+      cond <- condition
+      o <- if (cond) ifTrue else ifFalse
+    } yield o
 
   /**
    * Implement `divide` using `ifThenElse`.
    * if (b != 0), returns `a / b` otherwise, fail with `ArithmeticException`.
    */
   def divide(a: Int, b: Int): IO[ArithmeticException, Int] =
-    ???
+    ifThenElse(IO.succeed(b != 0))(IO.succeed(a / b), IO.fail(new ArithmeticException()))
 
   /**
    * Using `ifThenElse` implement parseInt that
@@ -242,8 +254,12 @@ object zio_composition {
   def factorial(n: Int): Int =
     if (n <= 1) 1
     else n * factorial(n - 1)
+
   def factorialIO(n: Int): UIO[Int] =
-    ???
+    if (n <= 1) IO.succeed(1)
+    else for {
+      n_1 <- factorialIO(n - 1)
+    } yield n * n_1
 
   /**
    * Make `factorialIO` tail recursion
@@ -318,7 +334,25 @@ object zio_composition {
         println("You guessed wrong! The number was " + number)
     }
   }
-  val playGame2: Task[Unit] = ???
+
+  lazy val playGame2: Task[Unit] = {
+    lazy val getNumber: Task[Int] = for {
+      _      <- Task.effect(println("Enter a number between 0 - 5: "))
+      input  <- Task.effect(scala.io.StdIn.readLine())
+      nr     <- Task.effect(input.toInt) orElse
+        (Task.effect(println("You didn't enter an integer!")) *> getNumber)
+    } yield nr
+
+    for {
+      number <- Task.effect(scala.util.Random.nextInt(5))
+      guess  <- getNumber
+      _      <- Task.effect(println(
+          if (guess == number) "You guessed right! The number was " + number
+          else "You guessed wrong! The number was " + number
+        )
+      )
+    } yield ()
+  }
 }
 
 object zio_failure {
@@ -382,7 +416,7 @@ object zio_failure {
    */
   val firstChoice: IO[ArithmeticException, Int] = divide1(100, 0)
   val secondChoice: UIO[Int]                    = IO.succeed(400)
-  val combined: UIO[Int]                        = ???
+  val combined: UIO[Int]                        = firstChoice orElse secondChoice
 
   // io.catchSome
   // io.catchAll
@@ -480,18 +514,33 @@ object zio_effects {
    * and choose the correct error type
    */
   val scheduledExecutor = Executors.newScheduledThreadPool(1)
-  def sleep(l: Long, u: TimeUnit): IO[Nothing, Unit] =
-    scheduledExecutor
-      .schedule(new Runnable {
-        def run(): Unit = ???
-      }, l, u) ?
+
+  //this sleeps without blocking anything. It's _semantically blocking_
+  def sleep(l: Long, u: TimeUnit): UIO[Unit] = UIO.effectAsync(
+    k =>
+      scheduledExecutor
+        .schedule( new Runnable {
+          def run(): Unit = k(UIO.unit)
+        }, l, u)
+    )
+
+  for {
+    _ <- sleep(1, TimeUnit.SECONDS)
+    _ <- Task(println("awake!"))
+    _ <- sleep(1, TimeUnit.SECONDS)
+    _ <- Task(println("awake again!"))
+    _ <- sleep(1, TimeUnit.SECONDS)
+    _ <- Task(println("awake again and again!"))
+  } yield ()
 
   /**
    * Wrap the following Java callback API, into an `IO` using `IO.effectAsync`
    * and use other ZIO type alias
    */
   def readChunkCB(success: Array[Byte] => Unit, failure: Throwable => Unit): Unit = ???
-  val readChunkIO: IO[Throwable, Array[Byte]]                                     = ???
+  val readChunkIO: IO[Throwable, Array[Byte]]                                     = IO.effectAsync { k =>
+    readChunkCB(arr => k(IO.effect(arr)), err => k(IO.fail(err)))
+  }
 
   /**
    * Rewrite this program using `readChunkIO`
@@ -504,6 +553,13 @@ object zio_effects {
       ),
     e1 => println(s"${e1.toString}")
   )
+
+  (for {
+    a1 <- IO.collectAll(List.fill(3)(readChunkIO)) // this is amazing stuff!
+    a2 <- readChunkIO
+    a3 <- readChunkIO
+    _ <- Task.effect(println(s"${a1 ++ a2 ++ a3}"))
+  } yield  ()).catchAll(error => Task.effect(println(s"${error.toString}")))
 
   /**
    * Using `ZIO.effectAsyncMaybe` wrap the following Java callback API into an `IO`
@@ -561,7 +617,23 @@ object impure_to_pure {
     }
   }
 
-  def ageExplainer2: UIO[Unit] = ???
+  def ageExplainer2: UIO[Unit] = {
+    def process(age: Int): String = if (age < 12) "You are a kid"
+    else if (age < 20) "You are a teenager"
+    else if (age < 30) "You are a grownup"
+    else if (age < 50) "You are an adult"
+    else if (age < 80) "You are a mature adult"
+    else if (age < 100) "You are elderly"
+    else "You are probably lying."
+
+
+    (for {
+      _ <- UIO.effectTotal(println("What is your age?"))
+      input <- Task.effect(scala.io.StdIn.readLine())
+      age <- Task.effect(input.toInt)
+      _ <- Task.effect(println(process(age)))
+    } yield ()).catchAll(_ => UIO.effectTotal(println("That's not an age, try again")) *> ageExplainer2)
+  }
 
   def decode1(read: () => Byte): Either[Byte, Int] = {
     val b = read()
@@ -592,25 +664,48 @@ object zio_interop {
    * Using `Fiber#toFuture`. Convert the following `Fiber` into a `Future`
    */
   val fiber: Fiber[Throwable, Int] = Fiber.succeed(1)
-  val fToFuture: Future[Int]       = ???
+  val fToFuture: UIO[Future[Int]]       = fiber.toFuture
 
   /**
    * Using `Fiber.fromFruture`. Wrap the following Future in a `Fiber`
    */
   val future1                          = () => Future(Thread.sleep(1000))(global)
-  val fToFiber: Fiber[Throwable, Unit] = ???
+  val fToFiber: Fiber[Throwable, Unit] = Fiber.fromFuture(future1())
 
   /**
    * Using `Task#toFuture`. Convert unsafely the following ZIO Task into `Future`.
    */
   val task1: Task[Int]       = IO.effect("wrong".toInt)
-  val tToFuture: Future[Int] = ???
+  val tToFuture: Future[Int] = new DefaultRuntime{}.unsafeRun(task1.toFuture)
 
   /**
    * Use `Task.fromFuture` to convert the following Scala `Future` into ZIO Task
    */
   val future2             = () => Future.successful("Hello World")
-  val task2: Task[String] = ???
+  val task2: Task[String] = Task.fromFuture(_ => future2() )
+
+}
+
+trait Logger {
+  def log(line: String): Unit
+}
+
+object LoggerEx {
+  trait LoggerIO {
+    def log(line: String): UIO[Unit]
+  }
+
+  object LoggerIO {
+    def fromLogger(logger: Logger): LoggerIO = new LoggerIO {
+      override def log(line: String): UIO[Unit] = UIO.effectTotal(logger.log(line))
+    }
+  }
+
+  val logger: LoggerIO = ???
+
+  for {
+    _ <- logger.log("asdfad")
+  } yield ()
 
 }
 
@@ -696,7 +791,20 @@ object zio_resources {
     } yield bytes
   }
 
-  def readFile2(file: File): Task[List[Byte]] = ???
+  def readFile2(file: File): IO[Exception, List[Byte]] = {
+    def readAll(is: InputStream, acc: List[Byte]): IO[Exception, List[Byte]] =
+      is.read.flatMap {
+        case None => IO.succeed(acc.reverse)
+        case Some(byte) => readAll(is, byte :: acc)
+      }
+
+    InputStream.openFile(file)
+      .bracket { is =>
+        is.close orElse UIO(())
+      } { use =>
+        readAll(use, List.empty[Byte])
+      }
+  }
 
   /**
    * Implement the `tryCatchFinally` method using `bracket` or `ensuring`.
@@ -774,6 +882,19 @@ object zio_resources {
 }
 
 object zio_environment {
+
+  //logging module
+  trait Logging {
+    def logging: Logging.Service
+  }
+
+  object Logging {
+    trait Service {
+      def log(line: String): UIO[Unit]
+    }
+  }
+
+  def program: ZIO[Logging, Nothing, Unit] = ???
 
   /**
    * The Environments in ZIO
