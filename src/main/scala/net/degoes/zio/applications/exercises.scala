@@ -33,6 +33,7 @@ object hangman extends App {
 
   /**
    * Create a hangman game that requires the capability to perform `Console` and `Random` effects.
+   * https://gitter.im/jdegoes/functional-scala?at=5c7ff410b4b6ef7bc867137e
    */
   def myGame: ZIO[Console with Random, Nothing, Unit] = ???
 

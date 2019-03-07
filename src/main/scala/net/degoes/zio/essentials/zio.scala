@@ -4,10 +4,14 @@ package net.degoes.zio
 package essentials
 
 import java.io.File
-import java.util.concurrent.{ Executors, TimeUnit }
+import java.util.concurrent.{Executors, TimeUnit}
 
 import scalaz.zio._
-import scalaz.zio.internal.{ Platform, PlatformLive }
+import scalaz.zio.clock.Clock
+import scalaz.zio.console.Console
+import scalaz.zio.internal.{Platform, PlatformLive}
+import scalaz.zio.random.Random
+import scalaz.zio.system.System
 
 import scala.io.Source
 
@@ -882,7 +886,7 @@ object zio_resources {
 }
 
 object zio_environment {
-
+  // https://gitter.im/jdegoes/functional-scala?at=5c7fe7038f294b134afa98a1
   //logging module
   trait Logging {
     def logging: Logging.Service
@@ -892,9 +896,30 @@ object zio_environment {
     trait Service {
       def log(line: String): UIO[Unit]
     }
+
+    def log(line: String): ZIO[Logging, Nothing, Unit] = ZIO.accessM(r => r.logging.log(line))
   }
 
-  def program: ZIO[Logging, Nothing, Unit] = ???
+//  in the same way another module
+//logging module\
+  trait ResultSet
+  trait Database {
+    def database: Database.Service
+  }
+
+  object Database {
+    trait Service {
+      def query(q: String): UIO[ResultSet]
+    }
+
+    def query(q: String): ZIO[Database, Nothing, ResultSet] = ZIO.accessM(r => r.database.query(q))
+  }
+  def program: ZIO[Logging with Database, Nothing, Unit] = for {
+    _ <- Logging.log("hello")
+    result <- Database.query("select * ")
+    _ <- Logging.log("hello1")
+    _ <- Logging.log("hello2")
+  } yield ()
 
   /**
    * The Environments in ZIO
@@ -902,30 +927,32 @@ object zio_environment {
    * clock (currentTime, sleep, nanoTime)
    * random (nextInt, nextBoolean, ...)
    * system (env)
+   * Blocking
+   * Scheduler
    */
   //write the type of a program that requires scalaz.zio.clock.Clock and which could fail with E or succeed with A
-  type ClockIO = ???
+  type ClockIO[E, A]  = ZIO[Clock, E, A]
 
   //write the type of a program that requires scalaz.zio.console.Console and which could fail with E or succeed with A
-  type ConsoleIO = ???
+  type ConsoleIO[E, A] = ZIO[Console, E, A]
 
   //write the type of a program that requires scalaz.zio.system.System and which could fail with E or succeed with A
-  type SystemIO = ???
+  type SystemIO[E, A] = ZIO[System, E, A]
 
   //write the type of a program that requires scalaz.zio.random.Random and which could fail with E or succeed with A
-  type RandomIO = ???
+  type RandomIO[E, A] = ZIO[Random, E, A]
 
   //write the type of a program that requires Clock and System and which could fail with E or succeed with A
-  type ClockWithSystemIO = ???
+  type ClockWithSystemIO[E, A] = ZIO[Clock with System, E, A]
 
   //write the type of a program that requires Console and System and which could fail with E or succeed with A
-  type ConsoleWithSystemIO = ???
+  type ConsoleWithSystemIO[E, A] = ZIO[Console with System, E, A]
 
   //write the type of a program that requires Clock, System and Random and which could fail with E or succeed with A
-  type ClockWithSystemWithRandom = ???
+  type ClockWithSystemWithRandom[E, A] = ZIO[Clock with System with Random, E, A]
 
   //write the type of a program that requires Clock, Console, System and Random and which could fail with E or succeed with A
-  type ClockWithConsoleWithSystemWithRandom = ???
+  type ClockWithConsoleWithSystemWithRandom[E, A] = ZIO[Clock with Console with System with Random, E, A]
 }
 
 object zio_dependency_management {
@@ -941,13 +968,13 @@ object zio_dependency_management {
    * Using `zio.console.getStrLn`, implement `getStrLn` and identify the
    * correct type for the ZIO effect.
    */
-  val getStrLn: ZIO[???, ???, ???] = ???
+  val getStrLn: ZIO[Console, IOException, String] = console.getStrLn
 
   /**
    * Using `zio.console.putStrLn`, implement `putStrLn` and identify the
    * correct type for the ZIO effect.
    */
-  def putStrLn(line: String): ZIO[???, ???, ???] = ???
+  def putStrLn(line: String): ZIO[Console, Nothing, Unit] = console.putStr(line)
 
   /**
    * Using `scalaz.zio.clock.nanoTime`, implement `nanoTime` and identity the
@@ -965,8 +992,17 @@ object zio_dependency_management {
    * Call three of the preceding methods inside the following `for`
    * comprehension and identify the correct type for the ZIO effect.
    */
-  val program: ZIO[???, ???, ???] =
-    ???
+  val program: ZIO[Console with System with Clock, Throwable, Unit] = for {
+    _ <- console.putStr("Hello what's your name")
+    name <- console.getStrLn
+    _ <- console.putStr(s"Nice to meet you $name")
+    time <- clock.nanoTime
+    _ <- console.putStr(s"The nanotime is $time")
+    _ <- console.putStr(s"What systme property do you want?")
+    propertyName <- console.getStrLn
+    property <- system.property(propertyName)
+    _ <- console.putStr(s"Property is $property")
+  } yield ()
 
   /**
    * Build a new Service called `Configuration`

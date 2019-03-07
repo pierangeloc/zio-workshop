@@ -4,6 +4,7 @@ package net.degoes.zio
 package essentials
 
 import scala.annotation.tailrec
+import scala.util.Try
 
 object effects {
 
@@ -19,7 +20,13 @@ object effects {
      * Implement `flatMap` for every type of `Console[A]` to turn it into a
      * `Console[B]` using the function `f`.
      */
-    final def flatMap[B](f: A => Console[B]): Console[B] = ???
+    final def flatMap[B](f: A => Console[B]): Console[B] = self match {
+      case Return(a) => f(a())
+      case ReadLine(next) => ReadLine { line =>
+        next(line).flatMap(f)
+      }
+      case WriteLine(line, next) => WriteLine(line, next.flatMap(f))
+    }
 
     final def map[B](f: A => B): Console[B] = flatMap(f andThen (Console.succeed(_)))
 
@@ -30,8 +37,9 @@ object effects {
     /**
      * Implement the `zip` function using `flatMap` and `map`.
      */
-    final def zip[B](that: Console[B]): Console[(A, B)] = ???
+    final def zip[B](that: Console[B]): Console[(A, B)] = self.flatMap(a => that.map(b => (a, b)))
   }
+
   object Console {
     final case class ReadLine[A](next: String => Console[A])      extends Console[A]
     final case class WriteLine[A](line: String, next: Console[A]) extends Console[A]
@@ -40,9 +48,9 @@ object effects {
     /**
      * Implement the following helper functions:
      */
-    final val readLine: Console[String]              = ???
-    final def writeLine(line: String): Console[Unit] = ???
-    final def succeed[A](a: => A): Console[A]        = ???
+    final val readLine: Console[String]              = ReadLine(s => Return(() => s))
+    final def writeLine(line: String): Console[Unit] = WriteLine(line, Return(() => ()))
+    final def succeed[A](a: => A): Console[A]        = Return( ()=> a)
   }
 
   /**
@@ -84,7 +92,7 @@ object effects {
    * Write a program that reads from the console then parse the given input into int if it possible
    * otherwise it returns None
    */
-  val readInt: Console[???] = ???
+  val readInt: Console[Option[Int]] = Console.readLine.map(s => Try(s.toInt).toOption)
 
   /**
    * implement the following effectful procedure, which interprets
@@ -151,25 +159,34 @@ object effects {
     Console.writeLine(q) *> Console.readLine
   }
 
+  val printAllAnswers = for {
+    ans <- answers3
+    _   <- Console.writeLine("answers: \n" + ans.mkString("\n"))
+  } yield ()
+
   /**
    * Implement the methods of Thunk
    */
-  class Thunk[A](val unsafeRun: () => A) {
-    def map[B](ab: A => B): Thunk[B]             = ???
-    def flatMap[B](afb: A => Thunk[B]): Thunk[B] = ???
-    def attempt: Thunk[Either[Throwable, A]]     = ???
+  class Thunk[A](val unsafeRun: () => A) { self =>
+    def map[B](ab: A => B): Thunk[B]             = new Thunk(() => ab(unsafeRun()))
+    def flatMap[B](afb: A => Thunk[B]): Thunk[B] = new Thunk(() => afb(unsafeRun()).unsafeRun())
+    def attempt: Thunk[Either[Throwable, A]]     = new Thunk(() => Try(unsafeRun()).toEither)
   }
   object Thunk {
-    def succeed[A](a: => A): Thunk[A]   = ???
-    def fail[A](t: Throwable): Thunk[A] = ???
+    def succeed[A](a: => A): Thunk[A]   = new Thunk(() => a)
+    def fail[A](t: Throwable): Thunk[A] = new Thunk(() => throw t)
   }
 
   /**
    * Build the version of printLn and readLn
    * then make a simple program base on that.
    */
-  def printLn(line: String): Thunk[Unit] = ??? //Thunk(() => println(line))
-  def readLn: Thunk[String]              = ??? //Thunk(() => scala.io.StdIn.readLine())
+  def printLn(line: String): Thunk[Unit] = new Thunk(() => println(line))
+  def readLn: Thunk[String]              = new Thunk(() => scala.io.StdIn.readLine())
 
-  val thunkProgram: Thunk[Unit] = ???
+  val thunkProgram: Thunk[Unit] = for {
+    _ <- printLn("Hello, what's your name?")
+    name <- readLn
+    _ <- printLn(s"Hi $name, nice to meet you!")
+  } yield ()
 }
