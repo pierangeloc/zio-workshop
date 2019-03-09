@@ -6,6 +6,7 @@ package essentials
 import java.io.File
 import java.util.concurrent.{Executors, TimeUnit}
 
+import scalaz.zio.Exit.Cause
 import scalaz.zio._
 import scalaz.zio.clock.Clock
 import scalaz.zio.console.Console
@@ -132,8 +133,10 @@ object zio_values {
    * Note: You will have to use the `.refineOrDie` method to refine the
    * `Throwable` type into something more specific.
    */
-  def arrayUpdate[A](a: Array[A], i: Int, f: A => A): ??? =
-    a.update(i, f(a(i))) ?
+  def arrayUpdate[A](a: Array[A], i: Int, f: A => A): IO[String, Unit] =
+    ZIO.effect(a.update(i, f(a(i)))).refineOrDie {
+      case _ => "error"
+    }
 
   /**
    * In order to execute the effectful programs that are described in `ZIO`
@@ -177,11 +180,10 @@ object zio_composition {
    * Using `flatMap` check the precondition `p` in the result of the computation of `io`
    * and improve the ZIO types in the following input parameters
    */
-  def verify(io: UIO[Int])(p: Int => Boolean): IO[String, Int] = ??? //io.flatMap()
-//    io.flatMap { i =>
-//      if (p) => IO.succeed(i)
-//      else IO.fail("preconditino failed")
-//    }
+  def verify(io: UIO[Int])(p: Int => Boolean): IO[String, Int] =
+    io.flatMap { i =>
+      if (p(i)) IO.succeed(i) else IO.fail("precondition failed")
+    }
 
   /**
    * Using `flatMap` and `map` compute the sum of the values of `a` and `b`
@@ -218,7 +220,7 @@ object zio_composition {
    * otherwise the program fails with `String` ("This is a negative int") error
    * and define the return ZIO type
    */
-  def positive(value: Int): IO[???, ???] = (value > 0) ?
+  def positive(value: Int): IO[String, Int] = ifThenElse(IO.succeed(value > 0))(IO.succeed(value), IO.fail("This is a negative int"))
 
   /**
    * Translate this a recursive function that repeats an action n times
@@ -231,7 +233,7 @@ object zio_composition {
     }
 
   def repeatN2[E](n: Int, action: IO[E, Unit]): IO[E, Unit] =
-    ???
+    IO.collectAll(List.fill(n)(action)).void
 
   /**
    * translate the following loop into its ZIO equivalent
@@ -241,7 +243,15 @@ object zio_composition {
     case Nil     => acc
     case x :: xs => sumList1(xs, acc + x)
   }
-  def sumList2(ints: IO[Nothing, List[Int]], acc: IO[Nothing, Int]): IO[Nothing, Int] = ???
+
+  def sumList2(ints: IO[Nothing, List[Int]], acc: IO[Nothing, Int]): IO[Nothing, Int] = for {
+    xxs <- ints
+    a   <- acc
+    out <- xxs match {
+      case x :: xs => sumList2(IO.succeed(xs), IO.succeed(a + x))
+      case Nil => acc
+    }
+  } yield out
 
   /**
    * translate the following loop into its ZIO equivalent
@@ -250,7 +260,9 @@ object zio_composition {
   def decrementUntilFour1(int: Int): Unit =
     if (int <= 4) ()
     else decrementUntilFour1(int - 1)
-  def decrementUntilFour2(int: Int): IO[Nothing, Unit] = ???
+  def decrementUntilFour2(int: Int): IO[Nothing, Unit] =
+    if (int <= 4) IO.succeed(())
+    else decrementUntilFour2(int - 1)
 
   /**
    * Implement the following loop into its ZIO equivalent.
@@ -262,19 +274,23 @@ object zio_composition {
   def factorialIO(n: Int): UIO[Int] =
     if (n <= 1) IO.succeed(1)
     else for {
-      n_1 <- factorialIO(n - 1)
-    } yield n * n_1
+      `n_1` <- factorialIO(n - 1)
+    } yield n * `n_1`
 
   /**
    * Make `factorialIO` tail recursion
    */
-  def factorialTailIO(n: Int, acc: Int = 1): UIO[Int] = ???
+  def factorialTailIO(n: Int, acc: Int = 1): UIO[Int] = if (n == 0) UIO.succeed(acc) else factorialTailIO(n - 1, acc * n)
 
   /**
    * Translate the following program that uses `flatMap` and `map` into
    * its equivalent using for-comprehension syntax sugar
    */
-  def multiply(a: UIO[Int], b: UIO[Int]): UIO[Int] = a.flatMap(v1 => b.map(v2 => v1 * v2))
+  def multiply(a: UIO[Int], b: UIO[Int]): UIO[Int] = //a.flatMap(v1 => b.map(v2 => v1 * v2))
+    for {
+      aa <- a
+      bb <- b
+    } yield aa * bb
 
   /**
    * Translate the following program, which uses for-comprehension, to its
@@ -287,30 +303,36 @@ object zio_composition {
     v3 <- IO.succeed("The Total Is: ")
   } yield v3 + (v1 + v2).toString
 
-  val totalStr2: IO[???, ???] = ???
+
+  val totalStr2: UIO[String] = IO.succeed(42).flatMap(
+    v1 => IO.succeed(58).flatMap(
+      v2 => IO.succeed("The Total Is: ").map(
+        v3 => v3 + (v1 + v2).toString)
+    )
+  )
 
   /**
    * Using `zip`
    * combine the result of two effects into a tuple
    */
-  def toTuple(io1: UIO[Int], io2: UIO[Int]): UIO[(Int, Int)] = ???
+  def toTuple(io1: UIO[Int], io2: UIO[Int]): UIO[(Int, Int)] = io1.zip(io2)
 
   /**
    * Using `zipWith`, add the two values computed by these effects.
    */
-  val combine: UIO[Int] = UIO.succeed(2).zipWith(UIO.succeed(40))(???)
+  val combine: UIO[Int] = UIO.succeed(2).zipWith(UIO.succeed(40))(_ + _)
 
   /**
    * Using `ZIO.foreach`
    * convert a list of integers into a List of String
    */
-  def convert(l: List[Int]): UIO[List[String]] = l.map(_.toString) ?
+  def convert(l: List[Int]): UIO[List[String]] = ZIO.foreach(l)(a => UIO.succeed(a.toString))
 
   /**
    * Using `ZIO.collectAll`
    * evaluate a list of effects and collect the result into an IO of a list with their result
    */
-  def collect(effects: List[UIO[Int]]): UIO[List[Int]] = effects ?
+  def collect(effects: List[UIO[Int]]): UIO[List[Int]] = ZIO.collectAll(effects)
 
   /**
    * rewrite this procedural program into a ZIO equivalent and improve the ZIO input/output types
@@ -320,7 +342,13 @@ object zio_composition {
     else if ((first + last).contains(" ")) "Your name is really weird"
     else "Your name is pretty normal"
 
-  def analyzeName2(first: UIO[String], last: UIO[String]): UIO[String] = ???
+  def analyzeName2(first: UIO[String], last: UIO[String]): IO[String, String] = for {
+    f <- first
+    l <- last
+    o <- if ((f + " " + l).length > 20) IO.fail("Your full name is really long")
+         else if ((f + l).contains(" ")) IO.fail("Your name is really weird")
+         else IO.succeed("Your name is pretty normal")
+  } yield o
 
   /**
    * Translate the following procedural program into ZIO.
@@ -344,7 +372,7 @@ object zio_composition {
       _      <- Task.effect(println("Enter a number between 0 - 5: "))
       input  <- Task.effect(scala.io.StdIn.readLine())
       nr     <- Task.effect(input.toInt) orElse
-        (Task.effect(println("You didn't enter an integer!")) *> getNumber)
+                (Task.effect(println("You didn't enter an integer!")) *> getNumber)
     } yield nr
 
     for {
@@ -366,13 +394,13 @@ object zio_failure {
    * represents a failure with a string error message, containing
    * a user-readable description of the failure.
    */
-  val stringFailure1: IO[String, Int] = ???
+  val stringFailure1: IO[String, Int] = IO.fail("Something went wrong")
 
   /**
    * Using the `IO.fail` method, create an `IO[Int, String]` value that
    * represents a failure with an integer error code.
    */
-  val intFailure: IO[Int, String] = ???
+  val intFailure: IO[Int, String] = IO.fail(400)
 
   /**
    * Translate the following exception-throwing program into its ZIO equivalent.
@@ -383,7 +411,10 @@ object zio_failure {
       throw new IndexOutOfBoundsException(s"The index $i is out of bounds [0, ${a.length} )")
     else a(i)
 
-  def accessArr2[A](i: Int, a: Array[A]): IO[IndexOutOfBoundsException, A] = ???
+  def accessArr2[A](i: Int, a: Array[A]): IO[IndexOutOfBoundsException, A] =
+    if (i < 0 || i >= a.length)
+    IO.fail(new IndexOutOfBoundsException(s"The index $i is out of bounds [0, ${a.length} )"))
+    else IO.succeed(a(i))
 
   /**
    * Translate the following ZIO program into its exception-throwing equivalent.
@@ -392,27 +423,33 @@ object zio_failure {
     if (d == 0) IO.fail(new ArithmeticException)
     else IO.succeedLazy(n / d)
 
-  def divide2(n: Int, d: Int): Int = ???
+  def divide2(n: Int, d: Int): Int =
+    if (d == 0)  throw new ArithmeticException
+    else  n / d
 
   /**
    * Recover from a division by zero error by using `fold`
    */
-  val recovered1: UIO[Option[Int]] = divide1(100, 0) ?
+  val recovered1: UIO[Option[Int]] = divide1(100, 0).fold(_ => None, Some(_)) ?
 
   /**
    * Using `foldM`, Print out either an error message or the division.
    */
-  val recovered2: UIO[Unit] = divide1(100, 0) ?
+  val recovered2: UIO[Unit] =
+    divide1(100, 0).foldM(
+      error => UIO.effectTotal(println(error.getMessage)),
+      n => UIO.effectTotal(println(n))
+    )
 
   /**
    * Recover from division by zero error by returning -1 using `either`
    */
-  val recovered3: UIO[Int] = divide1(100, 0) ?
+  val recovered3: UIO[Either[ArithmeticException, Int]] = divide1(100, 0).either
 
   /**
    * Recover from division by zero error by returning -1 using `option`
    */
-  val recovered4: UIO[Int] = divide1(100, 0) ?
+  val recovered4: UIO[Option[Int]] = divide1(100, 0).option
 
   /**
    * Use the `orElse` method of `IO` to try `firstChoice`, and fallback to
@@ -427,29 +464,31 @@ object zio_failure {
 
   /**
    * Using `IO.effectTotal`. Import a synchronous effect with a strange code
+   * This results in the fiber being terminated
    */
-  val defect1: UIO[Int] = "this is a short text".charAt(30) ?
+  val defect1: UIO[Int] = IO.effectTotal("this is a short text".charAt(30))
 
   /**
    * Throw an Exception in pure code using `IO.succeedLazy`.
+   * This results in the fiber being terminated
    */
-  val defect2: UIO[Int] = throw new Exception("oh no!") ?
+  val defect2: UIO[Int] = IO.succeedLazy(throw new Exception("oh no!"))
 
   /**
    * Using `die`, terminate this program with a fatal error.
    */
-  val terminate1: UIO[Int] = IO.unit ?
+  val terminate1: UIO[Int] = IO.die(new Throwable("Fatal!"))
 
   /**
    * Using `orDieWith`, terminate the following UIO program with a Throwable
    * when there it fails
    */
-  val terminate2: UIO[Int] = IO.fail("unexpected error") ?
+  val terminate2: UIO[Int] = IO.fail("unexpected error").orDieWith(new Exception(_))
 
   /**
    * Using `orDie`, terminate the following UIO program that fails with an exception
    */
-  val terminate3: UIO[Int] = IO.effectTotal("Hello".toInt) ?
+  val terminate3: UIO[Int] = IO.effect("Hello".toInt).orDie
 
   case class DomainError()
 
@@ -459,12 +498,19 @@ object zio_failure {
   /**
    * using `sandbox` recover the `veryBadIO` and catch all errors using `catchAll`
    */
-  val caught1: IO[DomainError, Int] = veryBadIO ?
+  val caught1: IO[DomainError, Int] = veryBadIO.sandbox.catchAll {
+    case Cause.Die(_) => IO.succeed(0)
+    case Cause.Fail(e) => IO.fail(e)
+    case Cause.Interrupt  => IO.succeed(0)
+  }
 
   /**
    * using `sandboxWith` improve the code above and use `catchSome` with a partial match for the possible errors
    */
-  def caught2: IO[DomainError, Int] = veryBadIO ?
+  def caught2: IO[DomainError, Int] = veryBadIO.sandboxWith { _.catchSome {
+      case Cause.Die(_) => UIO.succeed(0)
+    }
+  }
 }
 
 object zio_effects {
