@@ -4,6 +4,7 @@ package net.degoes.zio
 package essentials
 
 import java.io.File
+import java.lang.NumberFormatException
 import java.util.concurrent.{Executors, TimeUnit}
 
 import scalaz.zio.Exit.Cause
@@ -499,18 +500,21 @@ object zio_failure {
    * using `sandbox` recover the `veryBadIO` and catch all errors using `catchAll`
    */
   val caught1: IO[DomainError, Int] = veryBadIO.sandbox.catchAll {
-    case Cause.Die(_) => IO.succeed(0)
-    case Cause.Fail(e) => IO.fail(e)
-    case Cause.Interrupt  => IO.succeed(0)
+    case Cause.Die(_)     => IO.succeed(0)
+    case Cause.Fail(e)    => IO.fail(e)
+    case _  => IO.succeed(0)
   }
 
   /**
    * using `sandboxWith` improve the code above and use `catchSome` with a partial match for the possible errors
    */
-  def caught2: IO[DomainError, Int] = veryBadIO.sandboxWith { _.catchSome {
-      case Cause.Die(_) => UIO.succeed(0)
-    }
+  def caught2: IO[DomainError, Int] = veryBadIO.sandboxWith[Any, DomainError, Int] { _.catchSome {
+        case Cause.Die(_: ArithmeticException) =>
+          // Caught defect: divided by zero!
+          IO.succeed(0)
+      }
   }
+
 }
 
 object zio_effects {
@@ -518,13 +522,13 @@ object zio_effects {
   /**
    * Using `ZIO.effectTotal` method. increment the given int and identify the correct ZIO type
    */
-  def increment(i: Int): ??? = (i + 1) ?
+  def increment(i: Int): UIO[Int] = UIO.effectTotal(i + 1)
 
   /**
    * Using `ZIO.effect` method. wrap Scala's `toInt` method to convert a given string value to int
    * and identify the correct ZIO type, choose which type alias better
    */
-  def parseInt(str: String): IO[???, ???] = str.toInt ?
+  def parseInt(str: String): Task[Int] = Task.effect(str.toInt)
 
   /**
    * Using `flatMap` and `map`
@@ -532,32 +536,38 @@ object zio_effects {
    * calls `parseInt` to convert the given input into to an integer value
    * and define the return ZIO type
    */
-  def readInt: IO[???, ???] = scala.io.StdIn.readInt ?
+  def readInt: Task[Int] = Task.effect(scala.io.StdIn.readLine()).flatMap( s => parseInt(s).map(i => i))
 
   /**
    * Translate `readInt` using for-comprehension
    */
-  def _readInt: IO[???, ???] = ???
+  def _readInt: Task[Int] = for {
+    s <- Task.effect(scala.io.StdIn.readLine())
+    i <- parseInt(s)
+  } yield i
 
   /**
    * Using `catchSome` on `parseInt`, return -1 when
    * the parsing fails with the specified Exception `NumberFormatException` and return a -1
    * and identify the correct ZIO type
    */
-  def successfulParseInt(str: String): ??? = ???
+  def successfulParseInt(str: String): Task[Int] = Task.effect(scala.io.StdIn.readLine()).flatMap(parseInt).catchSome {
+    case e: NumberFormatException => Task.succeed(-1)
+  }
 
   /**
    * Using `catchAll` method, wrap Scala's `getLines` method to
    * import it into the world of pure functional programming and recover from all Exceptions
    * to return a successful result with an empty list
    */
-  def readFile(file: File): IO[???, List[String]] =
-    Source.fromFile(file).getLines.toList ?
+  def readFile(file: File): UIO[List[String]] =
+    IO.effect(Source.fromFile(file).getLines.toList).catchAll(_ => UIO.succeed(List()))
 
   /**
    * Using `refineOrDie` method, catch the NoSuchElementException and return -1
+   * piero: this has no solution with `refineOrDie` as refine is not to recover errors, it is to transform errors
    */
-  def first(as: List[Int]): Task[Int] = as.head ?
+  def first(as: List[Int]): Task[Int] = Task.effect(as.head) orElse Task.succeed(-1)
 
   /**
    * Use `ZIO.effectAsync` method to implement the following `sleep`method
@@ -574,7 +584,7 @@ object zio_effects {
         }, l, u)
     )
 
-  for {
+  val interleaved = for {
     _ <- sleep(1, TimeUnit.SECONDS)
     _ <- Task(println("awake!"))
     _ <- sleep(1, TimeUnit.SECONDS)
@@ -589,7 +599,7 @@ object zio_effects {
    */
   def readChunkCB(success: Array[Byte] => Unit, failure: Throwable => Unit): Unit = ???
   val readChunkIO: IO[Throwable, Array[Byte]]                                     = IO.effectAsync { k =>
-    readChunkCB(arr => k(IO.effect(arr)), err => k(IO.fail(err)))
+    readChunkCB(arr => k(IO.succeed(arr)), err => k(IO.fail(err)))
   }
 
   /**
@@ -606,9 +616,9 @@ object zio_effects {
 
   (for {
     a1 <- IO.collectAll(List.fill(3)(readChunkIO)) // this is amazing stuff!
-    a2 <- readChunkIO
-    a3 <- readChunkIO
-    _ <- Task.effect(println(s"${a1 ++ a2 ++ a3}"))
+//    a2 <- readChunkIO
+//    a3 <- readChunkIO
+    _ <- Task.effect(println(a1.mkString("")))
   } yield  ()).catchAll(error => Task.effect(println(s"${error.toString}")))
 
   /**
@@ -616,7 +626,9 @@ object zio_effects {
    * and use better ZIO type alias.
    */
   def readFromCacheCB(key: String)(success: Array[Byte] => Unit, error: Throwable => Unit): Option[Array[Byte]] = ???
-  def readFromCacheIO(key: String): IO[Throwable, Array[Byte]]                                                  = ???
+  def readFromCacheIO(key: String): IO[Throwable, Array[Byte]]                                                  = IO.effectAsyncMaybe(
+    k => readFromCacheCB(key)(arr => k(IO.succeed(arr)), err => k(IO.fail(err))).map(IO.succeed)
+  )
 
   /**
    * using `ZIO.effectAsyncInterrupt` wrap the following Java callback API into an `IO`
@@ -625,13 +637,16 @@ object zio_effects {
   case class HttpGetToken(canceller: () => Unit)
 
   def httpGetCB(url: String)(success: Array[Byte] => Unit, error: Throwable => Unit): HttpGetToken = ???
-  def httpGetIO(url: String): IO[Throwable, Array[Byte]]                                           = ???
+  def httpGetIO(url: String): IO[Throwable, Array[Byte]] =
+    IO.effectAsyncInterrupt { k =>
+      Left(UIO(httpGetCB(url)(arr => k(IO.succeed(arr)), err => k(IO.fail(err)))))
+    }
 
   /**
    * using `ZIO.effectAsync` import a pure value of type int
    * and identify the ZIO type
    */
-  val async42: ??? = 42 ?
+  val async42: UIO[Int] = ZIO.effectAsync(k => k(ZIO.succeed(42)))
 }
 
 object impure_to_pure {
