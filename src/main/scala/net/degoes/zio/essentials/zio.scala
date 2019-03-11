@@ -662,7 +662,14 @@ object impure_to_pure {
     }
   }
   def getName2[E](print: String => IO[E, Unit], read: IO[E, String]): IO[E, Option[String]] =
-    ???
+    for {
+      _ <- print("Do you want to enter your name?")
+      s <- read.map(_.toLowerCase)
+      o <- s.take(1) match {
+        case "y" => read.map(Some(_))
+        case _   => UIO.succeed(None)
+      }
+    } yield o
 
   def ageExplainer1(): Unit = {
     println("What is your age?")
@@ -712,12 +719,20 @@ object impure_to_pure {
       )
     }
   }
-  def decode2[E](read: IO[E, Byte]): IO[E, Either[Byte, Int]] = ???
+  def decode2[E](read: IO[E, Byte]): IO[E, Either[Byte, Int]] = read.flatMap { r =>
+    if (r < 0) IO.succeed(Left(r))
+    else IO.collectAll(List.fill(3)(read)).map {
+      case List(a, b, c) => Right(r + (a.toInt << 8) + (b.toInt << 16) + (c.toInt << 24))
+    }
+  }
 
   def replaceV1(as: List[Int], value: Int, newValue: Int): List[Int] =
     as.map(v => if (v == value) newValue else v)
 
-  def replaceV2(as: List[UIO[Int]], value: UIO[Int], newValue: UIO[Int]): UIO[List[Int]] = ???
+  def replaceV2(as: List[UIO[Int]], value: UIO[Int], newValue: UIO[Int]): UIO[List[Int]] = for {
+    v <- value
+    res  <- IO.foreach(as)(a => a.flatMap(x => if (x == v) newValue else UIO.succeed(x)))
+  } yield res
 }
 
 object zio_interop {
@@ -827,7 +842,10 @@ object zio_resources {
       throw new Exception("Boom!")
     } finally i -= 1
 
-  def increment2(): Task[Unit] = ???
+  def increment2(): Task[Unit] =
+    Task.effect(i += 1)
+      .flatMap(_ => Task.fail(new Exception("Boom!")))
+      .ensuring(Task.succeedLazy(i -= 1))
 
   /**
    * Rewrite the following procedural program to ZIO, using `IO.fail` and the
@@ -836,7 +854,7 @@ object zio_resources {
   def tryCatch1(): Unit =
     try throw new Exception("Uh oh")
     finally println("On the way out...")
-  val tryCatch2: Task[Unit] = ???
+  val tryCatch2: Task[Unit] = IO.fail(new Exception("Uh oh")).ensuring(UIO.succeedLazy(println("On the way out...")))
 
   /**
    * Rewrite the `readFile1` function to use `bracket` so resources can be
@@ -874,7 +892,9 @@ object zio_resources {
   /**
    * Implement the `tryCatchFinally` method using `bracket` or `ensuring`.
    */
-  def tryCatchFinally[E, A](try0: IO[E, A])(catch0: PartialFunction[E, IO[E, A]])(finally0: UIO[Unit]): IO[E, A] = ???
+  def tryCatchFinally[E, A](try0: IO[E, A])(catch0: PartialFunction[E, IO[E, A]])(finally0: UIO[Unit]): IO[E, A] =
+//    try0.ensuring(finally0).catchSome(catch0)
+    IO.bracket(try0.catchSome(catch0))(_ => finally0)(IO.succeed)
 
   /**
    * Use the `bracket` method to rewrite the following snippet to ZIO.
@@ -891,7 +911,12 @@ object zio_resources {
       case e: java.io.IOException => Nil
     } finally if (fis != null) fis.close()
   }
-  def readFileTCF2(file: File): Task[List[Byte]] = ???
+  def readFileTCF2(file: File): Task[List[Byte]] = IO.bracket(IO.effect(new FileInputStream(file)))(fis => UIO.succeedLazy(fis.close())){ fis =>
+    (for {
+      array <- IO.effect(Array.ofDim[Byte](file.length.toInt))
+      _     <- IO.effect(fis.read(array))
+    } yield array.toList) orElse UIO.succeedLazy(Nil)
+  }
 
   /**
    *`Managed[R, E, A]` is a managed resource of type `A`, which may be used by
@@ -924,13 +949,13 @@ object zio_resources {
    * Define a value of type `Managed` for the acquire and release actions
    * and identify the correct types
    */
-  val managed1: Managed[???, ???, ???] = ???
+  val managed1: Managed[Any, Throwable, Status] = ???
+//    Managed.make(ZIO.effect(status = {Status.Opened; status}))(_ => IO.succeedLazy(status = Status.Closed))
 
   /**
    * implement the computation of `use` for this Managed
    */
   val use1: IO[???, ???] = ???
-
   /**
    * write the same example using `manage` in ZIO for the `acquire` action
    */
@@ -941,12 +966,13 @@ object zio_resources {
    * and finally print out the result on the console
    */
   def acquire(a: Int, b: Int): Task[Int]    = (a / b) ?
-  val managed: Managed[Any, Throwable, Int] = ???
-  val check: Task[Int]                      = ???
+  val managed: Managed[Any, Throwable, Int] = ??? //Managed.make(acquire(4, 5))(i => UIO.effectTotal(s"i equals $i"))
+  val check: Task[Int]                      = ??? //managed.use(n => ZIO.effectTotal(println(s"$n is odd: ${n % 2 == 0}")))
 
 }
 
 object zio_environment {
+  //tagless final version
   // https://gitter.im/jdegoes/functional-scala?at=5c7fe7038f294b134afa98a1
   //logging module
   trait Logging {
@@ -1038,16 +1064,16 @@ object zio_dependency_management {
   def putStrLn(line: String): ZIO[Console, Nothing, Unit] = console.putStr(line)
 
   /**
-   * Using `scalaz.zio.clock.nanoTime`, implement `nanoTime` and identity the
+   * Using `scalaz.zio.clock.nanoTime`, implement `nanoTime` and identify the
    * correct type for the ZIO effect.
    */
-  val nanoTime: ZIO[???, ???, ???] = ???
+  val nanoTime: ZIO[Clock, Nothing, Long] = clock.nanoTime
 
   /**
    * Using `scalaz.zio.system`, implement `env` and identify the correct
    * type for the ZIO effect.
    */
-  def env(property: String): ZIO[???, ???, ???] = ???
+  def env(property: String): ZIO[System, SecurityException, Option[String]] = system.env(property)
 
   /**
    * Call three of the preceding methods inside the following `for`
@@ -1059,11 +1085,14 @@ object zio_dependency_management {
     _ <- console.putStr(s"Nice to meet you $name")
     time <- clock.nanoTime
     _ <- console.putStr(s"The nanotime is $time")
-    _ <- console.putStr(s"What systme property do you want?")
+    _ <- console.putStr(s"What system property do you want?")
     propertyName <- console.getStrLn
     property <- system.property(propertyName)
     _ <- console.putStr(s"Property is $property")
   } yield ()
+
+
+  val runnableProgram = program.provide(new Console.Live with System.Live with Clock.Live)
 
   /**
    * Build a new Service called `Configuration`
@@ -1077,7 +1106,7 @@ object zio_dependency_management {
   import system.System
 
   trait Config {
-    val config: ???
+    val config: Config.Service[Any]
   }
 
   object Config {
@@ -1088,7 +1117,11 @@ object zio_dependency_management {
     }
     // Production module implementation:
     trait Live extends Config {
-      val config: ??? = ???
+      val config: Config.Service[Any] = new Config.Service[Any] {
+        override val port: ZIO[Any, Nothing, Int] = UIO.succeed(8080)
+
+        override val host: ZIO[Any, Nothing, String] = UIO.succeed("localhost")
+      }
     }
     object Live extends Live
   }
@@ -1099,43 +1132,58 @@ object zio_dependency_management {
     /**
      * Access to the environment `Config` using `accessM`
      */
-    override val port = ???
-    override val host = ???
+    override  val port: ZIO[Config, Nothing, Int] = ZIO.accessM(_.config.port)
+    override  val host: ZIO[Config, Nothing, String] = ZIO.accessM(_.config.host)
   }
+
   import config_._
 
   /**
    * Write a program that depends on `Config` and `Console` and use the Scala
    * compiler to infer the correct type.
    */
-  val configProgram: ZIO[Config with Console, ???, ???] = ???
+  val configProgram: ZIO[Console with Config, Nothing, Unit] = for {
+    _ <- console.putStr("Hello, here is the configuration of your server")
+    host <- config_.host
+    port <- config_.port
+    _ <- console.putStr(s"host = $host, port = $port")
+  } yield ()
 
   /**
    * Give the `configProgram` its dependencies by supplying it with both `Config`
    * and `Console` modules, and determine the type of the resulting effect.
    */
-  configProgram.provide(???)
+  configProgram.provide(new Console.Live with Config.Live)
 
   /**
    * Create a `Runtime[Config with Console]` that can be used to run any
    * effect that has a dependency on `Config`:
    */
   val ConfigRuntime: Runtime[Config with Console] =
-    Runtime(??? : Config with Console, PlatformLive.Default)
+    Runtime(new Console.Live with Config.Live, PlatformLive.Default)
 
   /**
    * Define a ZIO value that describes an effect which uses Config with
    * Console that displays the port and host in the Console and fails
    * with a String if the host name contains `:`
    */
-  val simpleConfigProgram: ZIO[Config, String, Unit] = ???
+  val simpleConfigProgram: ZIO[Config with Console, String, Unit] = ZIO.accessM { env =>
+    for {
+      port <- env.config.port
+      host <- env.config.host
+      out  <- if (host.contains(":"))
+        IO.fail(s"hostname `$host` contains invalid chars")
+        else
+        UIO.succeed(s"host: $host, port: $port")
+    } yield out
+  }
 
   /**
    * run the `program` using `unsafeRun`
    * @note When you call unsafeRun the Runtime will provide all the environment that you defined above
    *       when you give a wrong Environment, you will get compile errors.
    */
-  val run: ??? = simpleConfigProgram ?
+  val run: Unit = ConfigRuntime.unsafeRun(simpleConfigProgram)
 
   /**
    * Build a file system service
