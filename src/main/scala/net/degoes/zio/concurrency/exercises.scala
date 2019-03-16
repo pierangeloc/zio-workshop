@@ -317,7 +317,7 @@ object zio_ref {
   /**
    * Using `Ref.make` constructor, create a `Ref` that is initially `0`.
    */
-  val makeZero: UIO[Ref[Int]] = 0 ?
+  val makeZero: UIO[Ref[Int]] = Ref.make(0)
 
   /**
    * Using `Ref#get` and `Ref#set`, change the
@@ -326,8 +326,9 @@ object zio_ref {
   val incrementedBy10: UIO[Int] =
     for {
       ref   <- makeZero
-      _     <- (ref ? : UIO[Unit])
-      value <- (ref ? : UIO[Int])
+      get   <- ref.get
+      _     <- ref.set(get + 10)
+      value <- ref.get
     } yield value
 
   /**
@@ -337,17 +338,22 @@ object zio_ref {
   val atomicallyIncrementedBy10: UIO[Int] =
     for {
       ref   <- makeZero
-      value <- (ref ? : UIO[Int])
+      value <- ref.update(_ + 10)
     } yield value
 
   /**
    * Refactor this contentious code to be atomic using `Ref#update`.
    */
-  def makeContentious1(n: Int): UIO[Fiber[Nothing, List[Nothing]]] =
-    Ref.make(0).flatMap(ref => IO.forkAll(List.fill(n)(ref.get.flatMap(value => ref.set(value + 10)).forever)))
+  def makeContentious1(n: Int): UIO[Fiber[Nothing, List[Nothing]]] = 
+    Ref.make(0).flatMap(ref =>
+      IO.forkAll(List.fill(n)(ref.get.flatMap(value =>
+        ref.set(value + 10)
+      ).forever))
+    )
   def makeContentious2(n: Int): UIO[Fiber[Nothing, List[Nothing]]] =
-    ???
-
+    Ref.make(0).flatMap(ref =>
+      IO.forkAll(List.fill(n)(ref.update(_ + 10))).forever
+    )
   /**
    * Using the `Ref#modify` to atomically increment the value by 10,
    * but return the old value, converted to a string.
@@ -355,7 +361,7 @@ object zio_ref {
   val atomicallyIncrementedBy10PlusGet: UIO[String] =
     for {
       ref   <- makeZero
-      value <- ref.modify(v => (???, v + 10))
+      value <- ref.modify(v => (v.toString, v + 10))
     } yield value
 
   /**
@@ -367,13 +373,18 @@ object zio_ref {
   case object Closed extends State
 
   def setActive(ref: Ref[State], boolean: Boolean): UIO[State] =
-    ???
+    ref.updateSome {
+      case Closed => Active
+    }
 
   /**
    * Using `Ref#modifySome` change the state to Closed only if the state was Active and return true
    * if the state is already closed return false
    */
-  def setClosed(ref: Ref[State], boolean: Boolean): UIO[Boolean] = ???
+  def setClosed(ref: Ref[State], boolean: Boolean): UIO[Boolean] =
+    ref.modifySome(false) {
+      case Active => (true, Closed)
+    }
 
   /**
    * RefM allows effects in atomic operations
@@ -381,15 +392,15 @@ object zio_ref {
   /**
    * Create a RefM using `RefM.apply`
    */
-  val refM: UIO[RefM[Int]] = 4 ?
+  val refM: UIO[RefM[Int]] = RefM.make(4)
 
   /**
    * update the refM with the square of the old state and print it out in the Console
    */
   val square =
     for {
-      ref <- (??? : UIO[Ref[Int]])
-      v   <- (??? : UIO[Ref[Int]])
+      ref <- refM.contramap[Console](identity)
+      v   <- ref.update(i => ZIO.succeed(i * i).flatMap ( n => console.putStrLn(s"$n")))
     } yield v
 
 }
@@ -478,8 +489,8 @@ object zio_promise {
     } yield value
 
   /**
- * Build auto-refreshing cache using `Ref`and `Promise`
- */
+   * Build auto-refreshing cache using `Ref`and `Promise`
+   */
 }
 
 object zio_queue {
