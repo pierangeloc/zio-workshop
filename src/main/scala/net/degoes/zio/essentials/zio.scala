@@ -948,7 +948,7 @@ object zio_resources {
    * Define a value of type `Managed` for the acquire and release actions
    * and identify the correct types
    */
-  val managed1: Managed[Any, Throwable, Status] = ???
+  val managed1: Managed[Throwable, Status] = ???
 //    Managed.make(ZIO.effect(status = {Status.Opened; status}))(_ => IO.succeedLazy(status = Status.Closed))
 
   /**
@@ -965,7 +965,7 @@ object zio_resources {
    * and finally print out the result on the console
    */
   def acquire(a: Int, b: Int): Task[Int]    = (a / b) ?
-  val managed: Managed[Any, Throwable, Int] = ??? //Managed.make(acquire(4, 5))(i => UIO.effectTotal(s"i equals $i"))
+  val managed: Managed[Throwable, Int] = ??? //Managed.make(acquire(4, 5))(i => UIO.effectTotal(s"i equals $i"))
   val check: Task[Int]                      = ??? //managed.use(n => ZIO.effectTotal(println(s"$n is odd: ${n % 2 == 0}")))
 
 }
@@ -1172,7 +1172,7 @@ object zio_dependency_management {
       out  <- if (host.contains(":"))
         IO.fail(s"hostname `$host` contains invalid chars")
         else
-        UIO.succeed(s"host: $host, port: $port")
+        console.putStr(s"host: $host, port: $port")
     } yield out
   }
 

@@ -10,7 +10,7 @@ import scalaz.zio._
 import scalaz.zio.clock.Clock
 import scalaz.zio.console.{Console, putStrLn}
 import scalaz.zio.duration._
-import scalaz.zio.stream.Sink
+import scalaz.zio.stream.{Sink, ZStream}
 
 import scala.concurrent.duration.Duration
 
@@ -72,7 +72,7 @@ object zio_fibers {
    * Identify the correct types.
    */
   val await1: UIO[Exit[Nothing, Int]] = Fiber.succeed[Nothing, Int](1).await
-  val await2 = Fiber.lift(IO.succeed("run forever").forever)
+  val await2 = Fiber.fromEffect(IO.succeed("run forever").forever)
   val await3: UIO[Exit[Int, Nothing]] = Fiber.fail[Int](1).await
   val await4: UIO[Exit[Exception, Nothing]] = Fiber.fail[Exception](new Exception("error!")).await
 
@@ -92,7 +92,7 @@ object zio_fibers {
    *   Identify the correct types.
    */
   val observe1: Fiber[Nothing, Int] = Fiber.succeed[Nothing, Int](1)
-  val observe2: IO[Nothing, Fiber[Nothing, Nothing]] = Fiber.lift(IO.succeed("run forever").forever)
+  val observe2: IO[Nothing, Fiber[Nothing, Nothing]] = Fiber.fromEffect(IO.succeed("run forever").forever)
   val observe3: Fiber[Int, Nothing] = Fiber.fail[Int](1)
   val observe4: Fiber[Exception, Nothing] = Fiber.fail[Exception](new Exception("error!"))
 
@@ -291,7 +291,7 @@ object zio_parallelism {
   val a: UIO[Int]                                  = UIO.succeedLazy((1 to 1000).sum)
   val b: UIO[Int]                                  = UIO.succeedLazy((1 to 10).sum)
   val firstCompleted1: ZIO[Console, Nothing, Unit] =
-    (a.contramap[Console](identity) raceWith b.contramap[Console](identity)) (
+    (a.provideSome[Console](identity) raceWith b.provideSome[Console](identity)) (
       {
         case (Exit.Success(left), rightFiber) => console.putStrLn(s"Left won: $left") <* rightFiber.interrupt
         case _ => UIO.succeed(())
@@ -397,15 +397,26 @@ object zio_ref {
   /**
    * update the refM with the square of the old state and print it out in the Console
    */
-  val square =
-    for {
-      ref <- refM.contramap[Console](identity)
-      v   <- ref.update(i => ZIO.succeed(i * i).flatMap ( n => console.putStrLn(s"$n")))
+  val square = for {
+      ref <- refM
+      v   <- ref.update(i => UIO.succeed(i * i) <* UIO.effectTotal(println(s"$i")) )
     } yield v
 
+  val t =  for {
+     ref <- RefM.make(2)
+     v   <- ref.update(n => console.putStrLn("Hello World!") *> IO.succeed(3))
+     _   <- putStrLn("Value = " + v) // Value = 5
+   } yield ()
 }
 
 object zio_promise {
+
+
+  val t: ZIO[Clock, Nothing, Int] = for {
+    promise <- Promise.make[Nothing, Int]
+    _       <- promise.succeed(42).delay(1.second).fork
+    value   <- promise.await // Resumes when forked fiber completes promise
+  } yield value
 
   /**
    * Using `Promise.make` construct a promise that cannot
@@ -677,35 +688,35 @@ object zio_stream {
   /**
    * Create a stream using `Stream.apply`
    */
-  val streamStr: Stream[Any, Nothing, Int] = ???
+  val streamStr: Stream[Nothing, Int] = ???
 
   /**
    * Create a stream using `Stream.fromIterable`
    */
-  val stream1: Stream[Any, Nothing, Int] = (1 to 42) ?
+  val stream1: Stream[Nothing, Int] = (1 to 42) ?
 
   /**
    * Create a stream using `Stream.fromChunk`
    */
   val chunk: Chunk[Int]                  = Chunk(43 to 100: _*)
-  val stream2: Stream[Any, Nothing, Int] = ???
+  val stream2: Stream[Nothing, Int] = ???
 
   /**
    * Make a queue and use it to create a stream using `Stream.fromQueue`
    */
-  val stream3: UIO[Stream[Any, Nothing, Int]] = ???
+  val stream3: UIO[Stream[Nothing, Int]] = ???
 
   /**
    * Create a stream from an effect producing a String
    * using `Stream.lift`
    */
-  val stream4: Stream[Any, Nothing, String] = ???
+  val stream4: Stream[Nothing, String] = ???
 
   /**
    * Create a stream of ints that starts from 0 until 42,
    * using `Stream#unfold`
    */
-  val stream5: Stream[Any, Nothing, Int] = ???
+  val stream5: Stream[Nothing, Int] = ???
 
   /**
    * Using `Stream.unfoldM`, create a stream of lines of input from the user,
@@ -713,22 +724,22 @@ object zio_stream {
    */
   import java.io.IOException
   import scalaz.zio.console.getStrLn
-  val stream6: Stream[Console, IOException, String] = ???
+  val stream6: ZStream[Console, IOException, String] = ???
 
   /**
    * Using `withEffect` log every element.
    */
-  val loggedInts: Stream[Console, Nothing, Int] = stream1 ?
+  val loggedInts: ZStream[Console, Nothing, Int] = stream1 ?
 
   /**
    * Using `Stream#filter` filter the even numbers
    */
-  val evenNumbrers: Stream[Any, Nothing, Int] = stream1 ?
+  val evenNumbrers: Stream[Nothing, Int] = stream1 ?
 
   /**
    * Using `Stream#takeWhile` take the numbers that are less than 10
    */
-  val lessThan10: Stream[Any, Nothing, Int] = stream1 ?
+  val lessThan10: Stream[Nothing, Int] = stream1 ?
 
   /**
    * Print out each value in the stream using `Stream#foreach`
@@ -738,23 +749,23 @@ object zio_stream {
   /**
    * Convert every Int into String using `Stream#map`
    */
-  val toStr: Stream[Any, Nothing, String] = stream1 ?
+  val toStr: Stream[Nothing, String] = stream1 ?
 
   /**
    * Merge two streams together using `Stream#merge`
    */
-  val mergeBoth: Stream[Any, Nothing, Int] = (stream1, stream2) ?
+  val mergeBoth: Stream[Nothing, Int] = (stream1, stream2) ?
 
   /**
    * Create a Sink using `Sink#readWhile` that takes an input of type String and check if it's not empty
    */
-  val sink: Sink[Any, Nothing, String, String, List[String]] = ???
+  val sink: Sink[Nothing, String, String, List[String]] = ???
 
   /**
    * Run `sink` on the stream to get a list of non empty string
    */
-  val stream                                         = Stream("Hello", "Hi", "Bonjour", "cześć", "", "Hallo", "Hola")
-  val firstNonEmpty: ZIO[Any, Nothing, List[String]] = ???
+  val stream = Stream("Hello", "Hi", "Bonjour", "cześć", "", "Hallo", "Hola")
+  val firstNonEmpty: UIO[List[String]] = ???
 
 }
 
@@ -763,7 +774,7 @@ object zio_schedule {
   /**
    * Using `Schedule.recurs`, create a schedule that recurs 5 times.
    */
-  val fiveTimes: Schedule[Any, Any, Int] = ???
+  val fiveTimes: Schedule[Any, Int] = ???
 
   /**
    * Using the `ZIO.repeat`, repeat printing "Hello World"
@@ -774,7 +785,7 @@ object zio_schedule {
   /**
    * Using `Schedule.spaced`, create a schedule that recurs forever every 1 second
    */
-  val everySecond: Schedule[Any, Any, Int] = ???
+  val everySecond: Schedule[Any, Int] = ???
 
   /**
    * Using the `&&` method of the `Schedule` object, the `fiveTimes` schedule,
@@ -813,7 +824,7 @@ object zio_schedule {
   /**
    * Using `Schedule.exponential`, create an exponential schedule that starts from 10 milliseconds.
    */
-  val exponentialSchedule: Schedule[Any, Any, Duration] =
+  val exponentialSchedule: Schedule[Any, Duration] =
     ???
 
   /**
@@ -832,19 +843,19 @@ object zio_schedule {
    * Using `Schedule.identity`, produce a schedule that recurs forever,
    * without delay, returning its inputs.
    */
-  def inputs[A]: Schedule[Any, A, A] = ???
+  def inputs[A]: Schedule[A, A] = ???
 
   /**
    * Using `Schedule#collect`, produce a schedule that recurs
    * forever, collecting its inputs into a list.
    */
-  def collectedInputs[A]: Schedule[Any, A, List[A]] =
+  def collectedInputs[A]: Schedule[A, List[A]] =
     Schedule.identity[A] ?
 
   /**
    * Using  `*>`, combine `fiveTimes` and `everySecond` but return the output of `everySecond`.
    */
-  val fiveTimesEverySecondR: Schedule[Any, Any, Int] = ???
+  val fiveTimesEverySecondR: Schedule[Any, Int] = ???
 
   /**
    * Produce a jittered schedule that first does exponential spacing (starting
@@ -854,6 +865,6 @@ object zio_schedule {
    * the schedule.
    */
   import scalaz.zio.random.Random
-  def mySchedule[A]: Schedule[Clock with Random, A, List[A]] =
+  def mySchedule[A]: ZSchedule[Clock with Random, A, List[A]] =
     ???
 }

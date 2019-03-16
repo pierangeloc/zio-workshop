@@ -15,6 +15,7 @@ object effects {
    */
   sealed trait Console[A] { self =>
 
+    import Console._
     /**
      * Implement `flatMap` for every type of `Console[A]` to turn it into a
      * `Console[B]` using the function `f`.
