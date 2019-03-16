@@ -4,14 +4,13 @@ package net.degoes.zio
 package essentials
 
 import java.io.File
-import java.lang.NumberFormatException
 import java.util.concurrent.{Executors, TimeUnit}
 
 import scalaz.zio.Exit.Cause
 import scalaz.zio._
 import scalaz.zio.clock.Clock
 import scalaz.zio.console.Console
-import scalaz.zio.internal.{Platform, PlatformLive}
+import scalaz.zio.internal.PlatformLive
 import scalaz.zio.random.Random
 import scalaz.zio.system.System
 
@@ -737,8 +736,8 @@ object impure_to_pure {
 
 object zio_interop {
 
-  import scala.concurrent.Future
   import scala.concurrent.ExecutionContext.global
+  import scala.concurrent.Future
 
   /**
    * Using `Fiber#toFuture`. Convert the following `Fiber` into a `Future`
@@ -1103,7 +1102,6 @@ object zio_dependency_management {
    * - implement all helper functions.
    */
   //Module
-  import system.System
 
   trait Config {
     val config: Config.Service[Any]

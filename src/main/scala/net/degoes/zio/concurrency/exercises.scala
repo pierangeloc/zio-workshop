@@ -243,9 +243,9 @@ object zio_parallelism {
    */
   def printAll(users: List[User]): ZIO[Console, Nothing, List[Unit]] = ZIO.foreachPar(users)(user => console.putStr(user.toString))
 
-  def fib(n: Int): UIO[BigInt] = 
+  def fib(n: Int): UIO[BigInt] =
     if (n <= 1) UIO.succeed(BigInt(n))
-    else fib(n -  1).zipWith(fib(n - 2))(_ + _)
+    else fib(n - 1).zipWith(fib(n - 2))(_ + _)
 
   /**
    * Compute the first 20 fibonacci numbers in parallel.
@@ -270,9 +270,9 @@ object zio_parallelism {
    * Using `ZIO#race`. Race queries against primary and secondary databases
    * to return whichever one succeeds first.
    */
-  sealed trait Database 
+  sealed trait Database
   object Database {
-    case object Primary extends Database 
+    case object Primary   extends Database
     case object Secondary extends Database
   }
   def getUserById(userId: Int, db: Database): Task[User] = ???
@@ -343,13 +343,9 @@ object zio_ref {
   /**
    * Refactor this contentious code to be atomic using `Ref#update`.
    */
-  def makeContentious1(n: Int): UIO[Fiber[Nothing, List[Nothing]]] = 
-    Ref.make(0).flatMap(ref =>
-      IO.forkAll(List.fill(n)(ref.get.flatMap(value =>
-        ref.set(value + 10)
-      ).forever))
-    )
-  def makeContentious2(n: Int): UIO[Fiber[Nothing, List[Nothing]]] = 
+  def makeContentious1(n: Int): UIO[Fiber[Nothing, List[Nothing]]] =
+    Ref.make(0).flatMap(ref => IO.forkAll(List.fill(n)(ref.get.flatMap(value => ref.set(value + 10)).forever)))
+  def makeContentious2(n: Int): UIO[Fiber[Nothing, List[Nothing]]] =
     ???
 
   /**
@@ -370,7 +366,7 @@ object zio_ref {
   case object Active extends State
   case object Closed extends State
 
-  def setActive(ref: Ref[State], boolean: Boolean): UIO[State] = 
+  def setActive(ref: Ref[State], boolean: Boolean): UIO[State] =
     ???
 
   /**
@@ -436,7 +432,7 @@ object zio_promise {
     } yield completed
 
   /**
-   * Make a promise that might fail with `Error`or produce a value of type 
+   * Make a promise that might fail with `Error`or produce a value of type
    * `Int` and interrupt it using `interrupt`.
    */
   val interrupted: UIO[Boolean] =
@@ -482,8 +478,8 @@ object zio_promise {
     } yield value
 
   /**
-   * Build auto-refreshing cache using `Ref`and `Promise`
-   */
+ * Build auto-refreshing cache using `Ref`and `Promise`
+ */
 }
 
 object zio_queue {
@@ -644,21 +640,20 @@ object zio_semaphore {
       msg       <- p.await
     } yield msg
 
-
   /**
-   * Implement `createAcceptor` to create a connection acceptor that will 
+   * Implement `createAcceptor` to create a connection acceptor that will
    * accept at most the specified number of connections.
    */
-  trait Request 
+  trait Request
   trait Response
   type Handler = Request => UIO[Response]
-  lazy val defaultHandler: Handler = ???
-  def startWebServer(handler: Handler): UIO[Nothing] = 
+  lazy val defaultHandler: Handler                   = ???
+  def startWebServer(handler: Handler): UIO[Nothing] =
     // Pretend this is implemented.
     ???
-  def limitedHandler(limit: Int, handler: Handler): UIO[Handler] = 
+  def limitedHandler(limit: Int, handler: Handler): UIO[Handler] =
     ???
-  val webServer1k: UIO[Nothing] = 
+  val webServer1k: UIO[Nothing] =
     for {
       acceptor <- limitedHandler(1000, defaultHandler)
       value    <- startWebServer(acceptor)
@@ -700,9 +695,9 @@ object zio_stream {
    * using `Stream#unfold`
    */
   val stream5: Stream[Any, Nothing, Int] = ???
-  
+
   /**
-   * Using `Stream.unfoldM`, create a stream of lines of input from the user, 
+   * Using `Stream.unfoldM`, create a stream of lines of input from the user,
    * terminating when the user enters the command "exit" or "quit".
    */
   import java.io.IOException
@@ -807,7 +802,7 @@ object zio_schedule {
   /**
    * Using `Schedule.exponential`, create an exponential schedule that starts from 10 milliseconds.
    */
-  val exponentialSchedule: Schedule[Any, Any, Duration] = 
+  val exponentialSchedule: Schedule[Any, Any, Duration] =
     ???
 
   /**
@@ -844,10 +839,10 @@ object zio_schedule {
    * Produce a jittered schedule that first does exponential spacing (starting
    * from 10 milliseconds), but then after the spacing reaches 60 seconds,
    * switches over to fixed spacing of 60 seconds between recurrences, but will
-   * only do that for up to 100 times, and produce a list of the inputs to 
+   * only do that for up to 100 times, and produce a list of the inputs to
    * the schedule.
    */
   import scalaz.zio.random.Random
-  def mySchedule[A]: Schedule[Clock with Random, A, List[A]] = 
+  def mySchedule[A]: Schedule[Clock with Random, A, List[A]] =
     ???
 }
