@@ -1,4 +1,4 @@
-val ZIOVersion = "0.12+1-03259d15+20190316-2242-SNAPSHOT"
+val ZIOVersion = "0.14+1-51b37ee5+20190317-2208-SNAPSHOT"
 
 lazy val root = project
   .in(file("."))

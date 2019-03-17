@@ -531,6 +531,7 @@ object zio_promise {
     def put(k: K, v: V)(refreshAction: K => UIO[V]): ZIO[Clock, Nothing, Unit] =
       for {
         map <- ref.update(_.updated(k, v)).provideSome[Clock](identity)
+        // we could use a promise that gets filled by this fiber, and interrupt it when the next put occurs. Problem: where to store this promise? In the map?
         newVFiber <- refreshAction(k).delay(refreshAfter).fork
         _         <- newVFiber.join.flatMap(newVal => ref.update(_.updated(k, newVal))).fork
       } yield ()
@@ -551,7 +552,7 @@ object zio_queue {
   val offered1: UIO[Unit] =
     for {
       queue <- makeQueue
-      _     <- (queue ? : UIO[Unit])
+      _     <- queue.offer(42)
     } yield ()
 
   /**
@@ -561,7 +562,7 @@ object zio_queue {
     for {
       queue <- makeQueue
       _     <- queue.offer(42)
-      value <- (queue ? : UIO[Int])
+      value <- queue.take
     } yield value
 
   /**
@@ -571,9 +572,19 @@ object zio_queue {
   val offeredTaken1: UIO[(Int, Int)] =
     for {
       queue <- makeQueue
-      _     <- (??? : UIO[Unit]).fork
-      v1    <- (queue ? : UIO[Int])
-      v2    <- (queue ? : UIO[Int])
+      _     <- (queue.offer(42) *> queue.offer(43)).fork
+      v1    <- queue.take
+      v2    <- queue.take
+    } yield (v1, v2)
+
+  val offeredTaken1AndPrint: ZIO[Console with Clock, Nothing, (Int, Int)] =
+    for {
+      queue <- makeQueue
+      _     <- (queue.offer(42).delay(3.seconds) *> queue.offer(43).delay(4.seconds)).fork
+      v1    <- queue.take
+      _     <- console.putStrLn(s"fetched $v1 from the queue")
+      v2    <- queue.take
+      _     <- console.putStrLn(s"fetched $v2 from the queue")
     } yield (v1, v2)
 
   /**
@@ -584,8 +595,8 @@ object zio_queue {
   val infiniteReader1: ZIO[Console, Nothing, List[Boolean]] =
     for {
       queue <- Queue.bounded[String](10)
-      _     <- (??? : ZIO[Console, Nothing, Nothing]).fork
-      vs    <- (??? : UIO[List[Boolean]])
+      _     <- queue.take.flatMap(console.putStrLn).forever.fork
+      vs    <- ZIO.foreach((1 to 100).toList)(n => queue.offer(s"element $n"))
     } yield vs
 
   /**
