@@ -12,7 +12,6 @@ import scalaz.zio.console.{Console, putStrLn}
 import scalaz.zio.duration._
 import scalaz.zio.stream.{Sink, ZStream}
 
-import scala.concurrent.duration.Duration
 
 object zio_fibers {
 
@@ -412,18 +411,18 @@ object zio_ref {
 object zio_promise {
 
 
-  val t: ZIO[Clock, Nothing, Int] = for {
+  val t: ZIO[Console with Clock, Nothing, Int] = for {
     promise <- Promise.make[Nothing, Int]
-    _       <- promise.succeed(42).delay(1.second).fork
+    _       <- promise.succeed(42).delay(5.second).fork
     value   <- promise.await // Resumes when forked fiber completes promise
+    _       <- console.putStr(s"you got your stuff buddy, $value")
   } yield value
 
   /**
    * Using `Promise.make` construct a promise that cannot
    * fail but can be completed with an integer.
    */
-  val makeIntPromise: UIO[Promise[Nothing, Int]] =
-    ???
+  val makeIntPromise: UIO[Promise[Nothing, Int]] = Promise.make[Nothing, Int]
 
   /**
    * Using `Promise.succeed`, complete a `makeIntPromise` with an integer 42
@@ -431,12 +430,13 @@ object zio_promise {
   val completed1: UIO[Boolean] =
     for {
       promise   <- makeIntPromise
-      completed <- (promise ? : UIO[Boolean])
+      completed <- promise.succeed(42)
     } yield completed
 
   /**
    * Using `Promise.fail`, try to complete `makeIntPromise`.
    * Explain your findings
+   * We can't fail an "unfailable" promise as we can't construct anything of type `Nothing`
    */
   val errored1: UIO[Boolean] =
     for {
@@ -447,10 +447,11 @@ object zio_promise {
   /**
    * Create a new promise that can fail with a `Error` or produce a value of type `String`
    */
+  case class Error(msg: String)
   val errored2: UIO[Boolean] =
     for {
-      promise   <- Promise.make[???, ???]
-      completed <- (promise ? : UIO[Boolean])
+      promise   <- Promise.make[Error, String]
+      completed <- promise.fail(Error("boom!"))
     } yield completed
 
   /**
@@ -459,8 +460,8 @@ object zio_promise {
    */
   val interrupted: UIO[Boolean] =
     for {
-      promise   <- Promise.make[???, ???]
-      completed <- (promise ? : UIO[Boolean])
+      promise   <- Promise.make[Error, String]
+      completed <- promise.interrupt
     } yield completed
 
   /**
@@ -469,9 +470,18 @@ object zio_promise {
   val handoff1: ZIO[Console with Clock, Nothing, Int] =
     for {
       promise <- Promise.make[Nothing, Int]
-      _       <- (clock.sleep(10.seconds) *> promise.succeed(42)).fork
+      _       <- (clock.sleep(10.seconds) *> promise.succeed(42)).fork //this fiber will succeed the promise
       _       <- putStrLn("Waiting for promise to be completed...")
-      value   <- (promise ? : UIO[Int])
+      value   <- promise.await
+      _       <- putStrLn("Got: " + value)
+    } yield value
+
+  val handoff10: ZIO[Console with Clock, Nothing, Int] =
+    for {
+      promise <- Promise.make[Nothing, Int]
+      _       <- promise.succeed(42).delay(10.seconds).fork //this fiber will succeed the promise
+      _       <- putStrLn("Waiting for promise to be completed...")
+      value   <- promise.await
       _       <- putStrLn("Got: " + value)
     } yield value
 
@@ -481,11 +491,21 @@ object zio_promise {
   val handoff2: ZIO[Console with Clock, Error, Int] =
     for {
       promise <- Promise.make[Error, Int]
-      _       <- (clock.sleep(10.seconds) *> promise.fail(new Error("Uh oh!"))).fork
+      _       <- (clock.sleep(10.seconds) *> promise.fail(new Error("Uh oh!"))).fork //this fiber will fail the promise
       _       <- putStrLn("Waiting for promise to be completed...")
-      value   <- (promise ? : IO[Error, Int])
+      value   <- promise.await
       _       <- putStrLn("This line will NEVER be executed")
     } yield value
+
+  val handoff20: ZIO[Console with Clock, Error, Int] =
+    for {
+      promise <- Promise.make[Error, Int]
+      _       <- promise.fail(new Error("Uh oh!")).delay(10.seconds).fork //this fiber will fail the promise
+      _       <- putStrLn("Waiting for promise to be completed...")
+      value   <- promise.await
+      _       <- putStrLn("This line will NEVER be executed")
+    } yield value
+
 
   /**
    * Using `await`. Try to retrieve a value from a promise
@@ -494,14 +514,28 @@ object zio_promise {
   val handoff3: ZIO[Clock with Console, Nothing, Int] =
     for {
       promise <- Promise.make[Nothing, Int]
-      _       <- promise.interrupt.delay(10.milliseconds).fork
-      value   <- (promise ? : IO[Nothing, Int])
+      _       <- promise.interrupt.delay(10.seconds).fork // this fiber will interrupt the promise
+      value   <- promise.await
       _       <- putStrLn("This line will NEVER be executed")
     } yield value
 
   /**
    * Build auto-refreshing cache using `Ref`and `Promise`
    */
+  class Cache[K, V](ref: Ref[Map[K, V]], expireIn: Duration, refreshAfter: Duration) {
+
+    def get(k: K): UIO[Option[V]] = for {
+      map <- ref.get
+    } yield map.get(k)
+
+    def put(k: K, v: V)(refreshAction: K => UIO[V]): ZIO[Clock, Nothing, Unit] =
+      for {
+        map <- ref.update(_.updated(k, v)).provideSome[Clock](identity)
+        newVFiber <- refreshAction(k).delay(refreshAfter).fork
+        _         <- newVFiber.join.flatMap(newVal => ref.update(_.updated(k, newVal))).fork
+      } yield ()
+  }
+
 }
 
 object zio_queue {
