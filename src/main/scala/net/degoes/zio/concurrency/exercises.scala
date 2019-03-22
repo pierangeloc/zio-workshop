@@ -605,14 +605,58 @@ object zio_queue {
    */
   sealed trait Message
   case class Increment(amount: Int) extends Message
+
   val makeCounter: UIO[Message => UIO[Int]] =
     for {
       counter <- Ref.make(0)
       mailbox <- Queue.bounded[(Message, Promise[Nothing, Int])](100)
-      _       <- (mailbox.take ? : UIO[Fiber[Nothing, Nothing]])
+       //define the loop
+      _       <- (
+                    for {
+                      mp <- mailbox.take
+                      (m, p) = mp
+                      _ <- m match {
+                        case  Increment(n) =>
+                          counter.modify(current => (current + n, current + n)).flatMap(current => p.succeed(current))
+                      }
+                    } yield ()
+                  ).forever.fork
     } yield { (message: Message) =>
-      ???
+      for {
+        p   <- Promise.make[Nothing, Int]
+        _   <- mailbox.offer((message, p))
+        res <- p.await
+      } yield res
     }
+
+  // generic actor
+  case class Actor[-A, +E, +B](run: A => IO[E, B]) {
+    def !(a: A): IO[E, B] = run(a)
+  }
+
+  object Actor {
+    def makeActor[S, E, A, B](s: S)(receive: (S, A) => IO[E, (S, B)]): UIO[Actor[A, E, B]] =
+    for {
+      state   <- Ref.make(s)
+      mailbox <- Queue.bounded[(A, Promise[E, B])](100)
+      _ <- { // processing of the actor, must run in a separate fiber and loop through the mailbox and perform the processing
+        for {
+          elem         <- mailbox.take
+          s            <- state.get
+          (a, promise) = elem
+          out          <- receive(s, a)
+          (newS, b)    = out
+          _            <- state.set(newS) *> promise.succeed(b)
+        } yield ()
+      }.forever.fork
+    } yield
+      Actor[A, E, B] { (a: A) => for { //enqueue input message and a promise for the output message
+          p <- Promise.make[E, B]
+          _ <- mailbox.offer((a, p))
+          b <- p.await
+        } yield b
+      }
+  }
 
   val counterExample: UIO[Int] =
     for {
@@ -620,6 +664,7 @@ object zio_queue {
       _       <- IO.collectAllPar(List.fill(100)(IO.foreach((0 to 100).map(Increment(_)))(counter)))
       value   <- counter(Increment(0))
     } yield value
+
 
   /**
    * using `Queue.sliding` create a queue with capacity 3 using sliding strategy
