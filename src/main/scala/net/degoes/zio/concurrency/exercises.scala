@@ -669,31 +669,31 @@ object zio_queue {
   /**
    * using `Queue.sliding` create a queue with capacity 3 using sliding strategy
    */
-  val slidingQ: UIO[Queue[Int]] = ???
+  val slidingQ: UIO[Queue[Int]] = Queue.sliding(3)
 
   /**
    * Using `Queue#offerAll`, offer 4 integer values to a sliding queue with capacity of 3
-   * and take them all using `Queue#takeAll`. What will you get as result?
+   * and take them all using `Queue#takeAll`. What will you get as result? 3, 4, 5
    */
   val offer4TakeAllS: UIO[List[Int]] = for {
     queue  <- Queue.sliding[Int](3)
-    _      <- queue.offerAll(List(1, 2, 3))
-    values <- (??? : UIO[List[Int]])
+    _      <- queue.offerAll(List(1, 2, 3, 4, 5))
+    values <- queue.takeAll
   } yield values
 
   /**
    * using `Queue.dropping` create a queue with capacity 3 using sliding strategy
    */
-  val dropingQ: UIO[Queue[Int]] = ???
+  val dropingQ: UIO[Queue[Int]] = Queue.dropping(3)
 
   /**
    * Using `Queue#offerAll`, offer 4 integer values to a dropping queue with capacity of 3
-   * and take them all using `Queue#takeAll`. What will you get as result?
+   * and take them all using `Queue#takeAll`. What will you get as result? 1, 2, 3
    */
   val offer4TakeAllD: UIO[List[Int]] = for {
-    queue  <- Queue.sliding[Int](3)
-    _      <- queue.offerAll(List(1, 2, 3))
-    values <- (??? : UIO[List[Int]])
+    queue  <- Queue.dropping[Int](3)
+    _      <- queue.offerAll(List(1, 2, 3, 4, 5))
+    values <- queue.takeAll
   } yield values
 
 }
