@@ -13,7 +13,10 @@ lazy val root = project
                                                |import scalaz.zio.stream._
                                                |object replRTS extends DefaultRuntime {}
                                                |import replRTS._
+                                               |import scalaz.zio.clock.Clock
+                                               |import scalaz.zio.duration._
                                                |implicit class RunSyntax[E, A](io: IO[E, A]){ def unsafeRun: A = replRTS.unsafeRun(io) }
+                                               |val liveEnv = new Clock.Live with Console.Live {}
                                          """.stripMargin
   )
 

@@ -701,9 +701,9 @@ object zio_queue {
 object zio_semaphore {
 
   /**
-   *Using `Semaphore.make`, create a semaphore with 1 permits.
+   * Using `Semaphore.make`, create a semaphore with 1 permits.
    */
-  val semaphore: UIO[Semaphore] = ???
+  val semaphore: UIO[Semaphore] = Semaphore.make(1)
 
   /**
    * Using `Semaphore#acquire` acquire permits sequentially (using IO.???) and
@@ -712,8 +712,8 @@ object zio_semaphore {
   val nbAvailable1: UIO[Long] =
     for {
       semaphore <- Semaphore.make(5)
-      _         <- (??? : UIO[Unit])
-      available <- (??? : UIO[Long])
+      _         <- semaphore.acquire
+      available <- semaphore.available
     } yield available
 
   /**
@@ -723,8 +723,8 @@ object zio_semaphore {
   val nbAvailable2: UIO[Long] =
     for {
       semaphore <- Semaphore.make(5)
-      _         <- (??? : UIO[Unit])
-      available <- (??? : UIO[Long])
+      _         <- semaphore.acquireN(3)
+      available <- semaphore.available
     } yield available
 
   /**
@@ -734,23 +734,26 @@ object zio_semaphore {
   val nbAvailable3: UIO[Long] =
     for {
       semaphore <- Semaphore.make(5)
-      _         <- (??? : UIO[Unit])
-      _         <- (??? : UIO[Unit])
-      available <- (??? : UIO[Long])
+      _         <- semaphore.acquire
+      _         <- semaphore.acquire
+      available <- semaphore.available
     } yield available
 
   /**
    * Using `Semaphore#withPermit` prepare a semaphore that once it acquires a permit
    * putStrL("is completed")
+   * `withPermit` makes sure that a permit is acquired before and released after the task is executed
    */
-  val s: ZIO[Clock, Nothing, Unit] =
+  val s: ZIO[Clock with Console, Nothing, Unit] =
     for {
       semaphore <- Semaphore.make(1)
-      p         <- Promise.make[Nothing, Unit]
-      _         <- (??? : UIO[Unit])
-      _         <- semaphore.acquire.delay(1.second).fork
+      _         <- semaphore.acquire
+      p         <- Promise.make[Nothing, String]
+      _         <- semaphore.withPermit(p.succeed("is completed")).fork
+      _         <- semaphore.release.delay(5.second).fork
       msg       <- p.await
-    } yield msg
+      _         <- console.putStrLn(msg)
+    } yield ()
 
   /**
    * Implement `createAcceptor` to create a connection acceptor that will
@@ -763,8 +766,12 @@ object zio_semaphore {
   def startWebServer(handler: Handler): UIO[Nothing] =
     // Pretend this is implemented.
     ???
-  def limitedHandler(limit: Int, handler: Handler): UIO[Handler] =
-    ???
+  def limitedHandler(limit: Int, handler: Handler): UIO[Handler] = for {
+    semaphore <- Semaphore.make(limit)
+  } yield { request: Request =>
+      semaphore.withPermit(handler(request))
+  }
+
   val webServer1k: UIO[Nothing] =
     for {
       acceptor <- limitedHandler(1000, defaultHandler)
@@ -778,84 +785,90 @@ object zio_stream {
   /**
    * Create a stream using `Stream.apply`
    */
-  val streamStr: Stream[Nothing, Int] = ???
+  val streamStr: Stream[Nothing, Int] = Stream(1, 2, 3)
 
   /**
    * Create a stream using `Stream.fromIterable`
    */
-  val stream1: Stream[Nothing, Int] = (1 to 42) ?
+  val stream1: Stream[Nothing, Int] = Stream.fromIterable(1 to 42)
 
   /**
    * Create a stream using `Stream.fromChunk`
    */
-  val chunk: Chunk[Int]                  = Chunk(43 to 100: _*)
-  val stream2: Stream[Nothing, Int] = ???
+  val chunk: Chunk[Int]             = Chunk(43 to 100: _*)
+  val stream2: Stream[Nothing, Int] = Stream.fromChunk(chunk)
 
   /**
    * Make a queue and use it to create a stream using `Stream.fromQueue`
    */
-  val stream3: UIO[Stream[Nothing, Int]] = ???
+  val stream3: UIO[Stream[Nothing, Int]] = for {
+    q <- Queue.bounded[Int](10)
+    s <- UIO.succeed(Stream.fromQueue(q))
+  } yield s
 
   /**
    * Create a stream from an effect producing a String
-   * using `Stream.lift`
+   * using `Stream.fromEffect`
    */
-  val stream4: Stream[Nothing, String] = ???
+  val stream4: Stream[Nothing, String] = Stream.fromEffect(UIO.succeed("bonjour"))
 
   /**
    * Create a stream of ints that starts from 0 until 42,
    * using `Stream#unfold`
    */
-  val stream5: Stream[Nothing, Int] = ???
+  val stream5: Stream[Nothing, Int] = Stream.unfold(0)(s => if (s <= 42) Some((s, s + 1)) else None)
 
   /**
    * Using `Stream.unfoldM`, create a stream of lines of input from the user,
    * terminating when the user enters the command "exit" or "quit".
    */
   import java.io.IOException
-  import scalaz.zio.console.getStrLn
-  val stream6: ZStream[Console, IOException, String] = ???
+  val stream6: ZStream[Console, IOException, String] = Stream.unfoldM(""){ s =>
+    if (s == "exit" || s == "quit")
+      UIO.succeed(None)
+    else console.getStrLn.map{ in => Some((in, in)) }
+  }
 
   /**
-   * Using `withEffect` log every element.
+   * Using `tap` log every element.
    */
-  val loggedInts: ZStream[Console, Nothing, Int] = stream1 ?
+  val loggedInts: ZStream[Console, Nothing, Int] = stream1.tap(i => console.putStr(i.toString))
 
   /**
    * Using `Stream#filter` filter the even numbers
    */
-  val evenNumbrers: Stream[Nothing, Int] = stream1 ?
+  val evenNumbrers: Stream[Nothing, Int] = stream1.filter(_ % 2 == 0)
 
   /**
    * Using `Stream#takeWhile` take the numbers that are less than 10
    */
-  val lessThan10: Stream[Nothing, Int] = stream1 ?
+  val lessThan10: Stream[Nothing, Int] = stream1.takeWhile(_ < 10)
 
   /**
    * Print out each value in the stream using `Stream#foreach`
    */
-  val printAll: ZIO[Console, Nothing, Unit] = stream1 ?
+  val printAll: ZIO[Console, Nothing, Unit] = stream1.foreach(i => console.putStrLn(i + ""))
 
   /**
    * Convert every Int into String using `Stream#map`
    */
-  val toStr: Stream[Nothing, String] = stream1 ?
+  val toStr: Stream[Nothing, String] = stream1.map(_.toString)
 
   /**
    * Merge two streams together using `Stream#merge`
    */
-  val mergeBoth: Stream[Nothing, Int] = (stream1, stream2) ?
+  val mergeBoth: Stream[Nothing, Int] = stream1.merge(stream2)
 
   /**
    * Create a Sink using `Sink#readWhile` that takes an input of type String and check if it's not empty
    */
-  val sink: Sink[Nothing, String, String, List[String]] = ???
+  val sink: Sink[Nothing, String, String, List[String]] = Sink.readWhile(_.nonEmpty)
 
   /**
    * Run `sink` on the stream to get a list of non empty string
    */
   val stream = Stream("Hello", "Hi", "Bonjour", "cześć", "", "Hallo", "Hola")
-  val firstNonEmpty: UIO[List[String]] = ???
+  val firstNonEmpty: UIO[List[String]] = stream.run(sink)
 
 }
 
@@ -864,64 +877,64 @@ object zio_schedule {
   /**
    * Using `Schedule.recurs`, create a schedule that recurs 5 times.
    */
-  val fiveTimes: Schedule[Any, Int] = ???
+  val fiveTimes: Schedule[Any, Int] = Schedule.recurs(5)
 
   /**
    * Using the `ZIO.repeat`, repeat printing "Hello World"
    * five times to the console.
    */
-  val repeated1 = putStrLn("Hello World") ?
+  val repeated1: ZIO[Console with Clock, Nothing, Int] = putStrLn("Hello World").repeat(Schedule.recurs(4))
 
   /**
    * Using `Schedule.spaced`, create a schedule that recurs forever every 1 second
    */
-  val everySecond: Schedule[Any, Int] = ???
+  val everySecond: Schedule[Any, Int] = Schedule.spaced(1.second)
 
   /**
    * Using the `&&` method of the `Schedule` object, the `fiveTimes` schedule,
    * and the `everySecond` schedule, create a schedule that repeats fives times,
    * evey second.
    */
-  val fiveTimesEverySecond = ???
+  val fiveTimesEverySecond = fiveTimes && everySecond
 
   /**
    *  Using the `ZIO#repeat`, repeat the action
    *  putStrLn("Hi hi") using `fiveTimesEverySecond`.
    */
-  val repeated2 = putStrLn("Hi hi") ?
+  val repeated2 = putStrLn("Hi hi").repeat(fiveTimesEverySecond)
 
   /**
    * Using `Schedule#andThen` the `fiveTimes`
    * schedule, and the `everySecond` schedule, create a schedule that repeats
    * fives times rapidly, and then repeats every second forever.
    */
-  val fiveTimesThenEverySecond = ???
+  val fiveTimesThenEverySecond = Schedule.recurs(20) && fiveTimes.andThen(everySecond)
 
   /**
    * Using `ZIO#retry`, retry the following error
    * a total of five times.
    */
   val error1   = IO.fail("Uh oh!")
-  val retried5 = error1 ?
+  val retried5 = error1.retry(fiveTimes)
 
   /**
    * Using the `Schedule#||`, the `fiveTimes` schedule,
    * and the `everySecond` schedule, create a schedule that repeats the minimum
    * of five times and every second.
    */
-  val fiveTimesOrEverySecond = ???
+  val fiveTimesOrEverySecond: ZSchedule[Any, Any, (Int, Int)] = fiveTimes || everySecond
 
   /**
    * Using `Schedule.exponential`, create an exponential schedule that starts from 10 milliseconds.
    */
   val exponentialSchedule: Schedule[Any, Duration] =
-    ???
+    Schedule.exponential(10.millis)
 
   /**
    * Using `Schedule.jittered` produced a jittered version of
    * `exponentialSchedule`.
    */
-  val jitteredExponential = exponentialSchedule ?
+  val jitteredExponential = exponentialSchedule.jittered
 
   /**
    * Using `Schedule.whileOutput`, produce a filtered schedule from
@@ -933,19 +946,19 @@ object zio_schedule {
    * Using `Schedule.identity`, produce a schedule that recurs forever,
    * without delay, returning its inputs.
    */
-  def inputs[A]: Schedule[A, A] = ???
+  def inputs[A]: Schedule[A, A] = Schedule.identity
 
   /**
    * Using `Schedule#collect`, produce a schedule that recurs
    * forever, collecting its inputs into a list.
    */
   def collectedInputs[A]: Schedule[A, List[A]] =
-    Schedule.identity[A] ?
+    Schedule.identity[A].collect
 
   /**
    * Using  `*>`, combine `fiveTimes` and `everySecond` but return the output of `everySecond`.
    */
-  val fiveTimesEverySecondR: Schedule[Any, Int] = ???
+  val fiveTimesEverySecondR: Schedule[Any, Int] = fiveTimes *> everySecond
 
   /**
    * Produce a jittered schedule that first does exponential spacing (starting
@@ -956,5 +969,10 @@ object zio_schedule {
    */
   import scalaz.zio.random.Random
   def mySchedule[A]: ZSchedule[Clock with Random, A, List[A]] =
-    ???
+    (Schedule.identity[A] <*
+    (Schedule.recurs(100) *>
+    (
+      Schedule.exponential(10.millis).jittered.whileOutput(spacing => spacing < 60.second) andThen Schedule.spaced(60.second)
+    )
+    )).collect
 }
