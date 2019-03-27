@@ -33,7 +33,17 @@ object hangman extends App {
    * Create a hangman game that requires the capability to perform `Console` and `Random` effects.
    * https://gitter.im/jdegoes/functional-scala?at=5c7ff410b4b6ef7bc867137e
    */
-  def myGame: ZIO[Console with Random, Nothing, Unit] = ???
+  def myGame: ZIO[Console with Random, Nothing, Unit] = for {
+    _ <- console.putStrLn("Hi, let's start!")
+    name <- getName
+    word <- chooseWord
+    state = State(name, Set(), word)
+    endState <- gameLoop(state)
+    outcome = if (endState.playerWon) "Great, you won!" else "Too bad, try again"
+    _    <- console.putStrLn("Do you want to play again? y/n")
+    yn   <- console.getStrLn.orDie
+    _    <- if (yn == "y") myGame else ZIO.succeed(())
+  } yield ()
 
   case class State(name: String, guesses: Set[Char], word: String) {
     def failures: Int = (guesses -- word.toSet).size
@@ -43,7 +53,17 @@ object hangman extends App {
     def playerWon: Boolean = (word.toSet -- guesses).isEmpty
   }
 
-  def gameLoop(state: State): ZIO[Console, Nothing, State] = ???
+  def gameLoop(state: State): ZIO[Console, Nothing, State] = for {
+    _         <- renderState(state)
+    char      <- getChoice
+
+    newState  <- ZIO.succeed(state.copy(guesses = state.guesses + char))
+
+    continue  <- if (newState.playerLost ) console.putStrLn("sorry, you lost") *> ZIO.succeed(false)
+                else if (newState.playerWon) console.putStrLn(s"Congrats, you won and the word was:") *> ZIO.succeed(false)
+                else ZIO.succeed(true)
+    nextState <- if(continue) gameLoop(newState) else renderState(newState).const(newState)
+  } yield nextState
 
   def renderState(state: State): ZIO[Console, Nothing, Unit] = {
 
@@ -67,11 +87,20 @@ object hangman extends App {
     putStrLn(text)
   }
 
-  def getChoice: ZIO[Console, Nothing, Char] = ???
+  def getChoice: ZIO[Console, Nothing, Char] = for {
+    _  <- console.putStrLn("Please enter ONE letter")
+    in <- console.getStrLn.orDie
+    c <- if (in.length == 1) ZIO.succeed(in.head.toLower) else getChoice
+  } yield c
 
-  def getName: ZIO[Console, Nothing, String] = ???
+  def getName: ZIO[Console, Nothing, String] = for {
+    _ <- console.putStrLn("Please enter your name")
+    name <- console.getStrLn.orDie
+  } yield name
 
-  def chooseWord: ZIO[Random, Nothing, String] = ???
+  def chooseWord: ZIO[Random, Nothing, String] = for {
+    ix <- random.nextInt(Dictionary.length)
+  } yield Dictionary(ix)
 
   val Dictionary = List(
     "aaron",
@@ -950,17 +979,17 @@ object hangman extends App {
   )
 
   /**
-   *  Instantiate the polymorphic game to the `IO[Nothing, ?]` type.
-   *  by providing `Console`and `Random`
-   */
-  val myGameIO: UIO[Unit] = myGame ?
+    *  Instantiate the polymorphic game to the `IO[Nothing, ?]` type.
+    *  by providing `Console`and `Random`
+    */
+  val myGameIO: UIO[Unit] = myGame.provide(new Console.Live with Random.Live {})
 
   /**
    * Create a test data structure that can contain a buffer of lines (to be
    * read from the console), a log of output (that has been written to the
    * console), and a list of "random" numbers.
    */
-  override def run(args: List[String]): ZIO[Environment, Nothing, Int] = ???
+  override def run(args: List[String]): ZIO[Environment, Nothing, Int] = myGame.const(0) orElse ZIO.succeed(1)
 }
 
 object parallel_web_crawler {
