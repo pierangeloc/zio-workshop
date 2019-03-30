@@ -1,4 +1,4 @@
-val ZIOVersion = "0.14+1-51b37ee5+20190317-2208-SNAPSHOT"
+val ZIOVersion = "0.19"
 
 lazy val root = project
   .in(file("."))
@@ -28,7 +28,9 @@ libraryDependencies ++= Seq(
   // Scalaz-zio
   "org.scalaz" %% "scalaz-zio"        % ZIOVersion,
 //  "org.scalaz" %% "scalaz-zio-future" % ZIOVersion,
-  // URL parsing
+  "org.scalafx" %% "scalafx" % "8.0.144-R12",
+
+// URL parsing
   "io.lemonlabs" %% "scala-uri" % "1.4.1",
   // Ammonite
   "com.lihaoyi" % "ammonite" % "1.1.2" % "test" cross CrossVersion.full
