@@ -1,10 +1,12 @@
 package net.degoes.zio.applications
 
-import net.degoes.zio.applications.mandelbrot.{Canvas, MandelbrotAlgo}
+import net.degoes.zio.applications.mandelbrot.Canvas.CanvasLive
 import scalafx.scene.canvas.{Canvas => SCanvas}
 import scalafx.scene.paint.Color
-import scalaz.zio.{DefaultRuntime, UIO, ZIO}
-import scalaz.zio.console
+import scalaz.zio.console.Console
+import scalaz.zio.clock
+import scalaz.zio.clock.Clock
+import scalaz.zio.{DefaultRuntime, UIO, ZIO, console}
 
 import scala.annotation.tailrec
 /**
@@ -13,9 +15,14 @@ import scala.annotation.tailrec
  * Created with ♥ in Amsterdam
  */
 object mandelbrot {
-/*
-We generate a grid of 600 x 400 complex nrs and map each nr to a colour
- */
+  /*
+  We generate a grid of 600 x 400 complex nrs and map each nr to a colour
+  */
+
+  case class ColoredPoint(x: Int, y: Int, color: Color) {
+    override def toString: String = s"($x, $y, [${color.red}, ${color.green}, ${color.blue}])"
+  }
+  case class ColoredBitmap(coloredPoints: List[ColoredPoint])
   //canvas component
   sealed trait Canvas {
     val canvas: Canvas.Service[Any]
@@ -23,24 +30,23 @@ We generate a grid of 600 x 400 complex nrs and map each nr to a colour
 
   object Canvas {
     trait Service[-R] {
-      def drawPoint(x: Int, y: Int, color: Color): ZIO[R, Nothing, Unit]
+      def drawPoint(p: ColoredPoint): ZIO[R, Nothing, Unit]
     }
 
     trait CanvasLive extends Canvas {
       val scanvas: SCanvas
       val canvas = new Canvas.Service[Any] {
-        override def drawPoint(x: Int, y: Int, color: Color): ZIO[Any, Nothing, Unit] = {
-          def setColor: UIO[Unit] = ZIO.effect(scanvas.graphicsContext2D.setFill(color)).catchAll { e => {
-              e.printStackTrace();
+        override def drawPoint(coloredPoint: ColoredPoint): ZIO[Any, Nothing, Unit] = {
+          def setColor: UIO[Unit] = ZIO.effect(scanvas.graphicsContext2D.setFill(coloredPoint.color)).catchAll { e => {
+              e.printStackTrace()
               UIO.succeed(())
             }
           }
 
-          def drawOval: UIO[Unit] = ZIO.effectTotal(scanvas.graphicsContext2D.fillOval(x, y, 0.1, 0.1))
+          def drawOval: UIO[Unit] = ZIO.effectTotal(scanvas.graphicsContext2D.fillOval(coloredPoint.x, coloredPoint.y, 1, 1))
 
             //issue: how to share context of this scanvas if points are drawn in parallel ? maybe with a semaphore with 1 permit
           setColor *> drawOval
-
         }
       }
     }
@@ -52,16 +58,17 @@ We generate a grid of 600 x 400 complex nrs and map each nr to a colour
     }
   }
 
-  object canvas extends Canvas.Service[Canvas] {
-    override def drawPoint(x: Int, y: Int, color: Color): ZIO[Canvas, Nothing, Unit] = ZIO.accessM(_.canvas.drawPoint(x, y, color))
+  object canvasCapability extends Canvas.Service[Canvas] {
+    override def drawPoint(p: ColoredPoint): ZIO[Canvas, Nothing, Unit] = ZIO.accessM(_.canvas.drawPoint(p))
   }
 
-  case class Frame(width: Int = 400, height: Int = 600) {
+  case class Frame(width: Int = 600, height: Int = 400) {
     def allPoints: List[(Int, Int)] = for {
       xx <- (0 until width).toList
       yy <- (0 until height).toList
     } yield (xx, yy)
   }
+
   case class ComplexRectangle(
     xMin: Double = -2.0,
     xMax: Double = 1.0,
@@ -76,8 +83,6 @@ We generate a grid of 600 x 400 complex nrs and map each nr to a colour
       )
   }
 
-
-  //an Int complex, as we are only interested in * and +
   case class Complex(x: Double, y: Double) { self =>
     def +(other: Complex): Complex = Complex(self.x + other.x, self.y + other.y)
     def *(other: Complex): Complex = (self, other) match {
@@ -93,7 +98,7 @@ We generate a grid of 600 x 400 complex nrs and map each nr to a colour
 
   class MandelbrotAlgo(maxIterations:Int) {
 
-    def iterate(c: Complex, bailout:Int): Int = {
+    def iterate(c: Complex, bailout: Int): Int = {
 
       @tailrec
       def run(z: Complex, iter: Int): Int =
@@ -118,33 +123,22 @@ We generate a grid of 600 x 400 complex nrs and map each nr to a colour
     def apply(nrIterations: Int) = new MandelbrotAlgo(nrIterations)
   }
 
-//  def getCanvas: UIO[Canvas] = ???
-//  def colorComplex(z: Complex, color: Color, canvas: Canvas): UIO[Unit] = ZIO.effectTotal {
-//    val gc = canvas.graphicsContext2D
-//    gc.fillOval()
-//
-//  }
-
-  def computeColor(x: Int, y: Int, frame: Frame, complexRectangle: ComplexRectangle, mandelbrot: MandelbrotAlgo): ZIO[Any, Nothing, (Int, Int, Color)] = for {
+  def computeColor(x: Int, y: Int, frame: Frame, complexRectangle: ComplexRectangle, mandelbrot: MandelbrotAlgo): ZIO[Any, Nothing, ColoredPoint] = for {
     iter  <- ZIO.effectTotal(mandelbrot.iterate(complexRectangle.pixelToComplex(frame)(x, y),  1000))
     color <- ZIO.succeed(mandelbrot.getColor(iter))
-  } yield (x, y, color)
+  } yield ColoredPoint(x, y, color)
 
-
-  def computeAndShow(x: Int, y: Int, frame: Frame, complexRectangle: ComplexRectangle, mandelbrot: MandelbrotAlgo): ZIO[Canvas, Nothing, Unit] = for {
-    iter  <- ZIO.effectTotal(mandelbrot.iterate(complexRectangle.pixelToComplex(frame)(x, y),  1000))
-    color <- ZIO.succeed(mandelbrot.getColor(iter))
-    _     <- canvas.drawPoint(x, y, color)
-  } yield ()
-
-  def program: ZIO[Canvas, Nothing, Unit] = for {
-    frame            <- UIO.succeed(Frame(400, 600))
+  def program: ZIO[Canvas with Console with Clock, Nothing, Unit] = for {
+    start            <- clock.nanoTime
+    frame            <- UIO.succeed(Frame())
     complexRectangle <- UIO.succeed(ComplexRectangle(-2, 1, -1, 1))
     mandelbrot       <- UIO.succeed(MandelbrotAlgo(1000))
-    _                <- ZIO.foreachPar(frame.allPoints) {
-                          case (x, y) => computeAndShow(x, y, frame, complexRectangle, mandelbrot)
-//                          case (x, y) => computeColor(x, y, frame, complexRectangle, mandelbrot)
+    coloredPoints    <- ZIO.foreachPar(frame.allPoints) {
+                          case (x, y) => computeColor(x, y, frame, complexRectangle, mandelbrot)
                         }
+    end              <- clock.nanoTime
+    _                <- console.putStr(s"calculated all points; it took ${(end - start) / 1000} μs; coloredPoints = \n${coloredPoints.take(20).mkString("\n")}")
+    _                <- ZIO.foreach(coloredPoints)(coloredPoint => canvasCapability.drawPoint(coloredPoint))
   } yield ()
 
 
@@ -156,60 +150,31 @@ import scalafx.application.JFXApp
 import scalafx.application.JFXApp.PrimaryStage
 import scalafx.geometry.Insets
 import scalafx.scene.Scene
-import scalafx.scene.effect.DropShadow
 import scalafx.scene.layout.HBox
 import scalafx.scene.paint.Color._
-import scalafx.scene.paint.{LinearGradient, Stops}
-import scalafx.scene.text.Text
 
-object ScalaFXHelloWorld extends JFXApp {
+object ScalaFXHelloWorld extends JFXApp { self =>
 
-  val canvas = new SCanvas(400, 600)
+  val canvas = new SCanvas(600, 400)
 
   stage = new PrimaryStage {
-    title = "ScalaFX Hello World"
-//    val gc = canvas.graphicsContext2D
-//    gc.fill = Color.Green
-//    for {
-//      x <- (0 to 600)
-//      y <- (0 to 700)
-//    } yield gc.fillOval(x, y, 1, 1)
-
-//    gc.stroke = Color.Blue
-//    gc.lineWidth = 5
-//    gc.strokeLine(40, 10, 10, 40)
+    title = "Functional Mandelbrot"
 
     scene = new Scene {
       fill = Black
       content = new HBox {
         padding = Insets(20)
         children = Seq(
-          canvas,
-          new Text {
-            text = "Hello "
-            style = "-fx-font-size: 48pt"
-            fill = new LinearGradient(
-              endX = 0,
-              stops = Stops(PaleGreen, SeaGreen))
-          },
-          new Text {
-            text = "World!!!"
-            style = "-fx-font-size: 48pt"
-            fill = new LinearGradient(
-              endX = 0,
-              stops = Stops(Cyan, DodgerBlue)
-            )
-            effect = new DropShadow {
-              color = DodgerBlue
-              radius = 25
-              spread = 0.25
-            }
-          }
+          canvas
         )
       }
     }
   }
 
   val rts = new DefaultRuntime {}
-  rts.unsafeRun (mandelbrot.program.provide(Canvas.CanvasLive.withScanvas(canvas)))
+  val env = new CanvasLive with Console.Live with Clock.Live {
+    override val scanvas: SCanvas = self.canvas
+  }
+
+  rts.unsafeRun (mandelbrot.program.provide(env))
 }
